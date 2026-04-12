@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexusIDE — The Future of Code</title>
+  <meta name="description" content="NexusIDE: next-gen IDE built with Rust. Encrypted vault, AI copilot, Git, debugging. 30MB RAM. 8MB binary.">
+  <meta name="theme-color" content="#00d4ff">
+  <meta property="og:title" content="NexusIDE — The Future of Code">
+  <meta property="og:description" content="Secure. AI-Powered. Native. The IDE that doesn't copy anyone.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+  <style>
+    :root{--bg:#04060c;--surface:#0a0f1a;--accent:#00d4ff;--accent2:#a78bfa;--accent3:#34d399;--text:#e2e8f0;--dim:#4a5568;--glow:rgba(0,212,255,0.15)}
+    *{margin:0;padding:0;box-sizing:border-box}html{scroll-behavior:smooth}
+    body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);overflow-x:hidden;-webkit-font-smoothing:antialiased}
+    .grid-bg{position:fixed;inset:0;z-index:0;background-image:linear-gradient(rgba(0,212,255,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(0,212,255,.03) 1px,transparent 1px);background-size:60px 60px;mask-image:radial-gradient(ellipse 80% 50% at 50% 0%,black 40%,transparent 100%)}
+    .content{position:relative;z-index:1}
+    .hero{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:2rem;position:relative}
+    .hero-orb{position:absolute;width:500px;height:500px;border-radius:50%;background:radial-gradient(circle,var(--accent) 0%,transparent 70%);opacity:.06;top:10%;left:50%;transform:translateX(-50%);filter:blur(80px);animation:orb 6s ease-in-out infinite}
+    @keyframes orb{0%,100%{opacity:.04;transform:translateX(-50%) scale(1)}50%{opacity:.08;transform:translateX(-50%) scale(1.1)}}
+    .logo-mark{width:80px;height:80px;border-radius:20px;background:linear-gradient(135deg,var(--accent),#0088aa);display:flex;align-items:center;justify-content:center;font-size:36px;font-weight:800;color:var(--bg);margin-bottom:2rem;box-shadow:0 0 40px rgba(0,212,255,.3),0 0 80px rgba(0,212,255,.1);animation:float 4s ease-in-out infinite}
+    @keyframes float{0%,100%{transform:translateY(0)}50%{transform:translateY(-8px)}}
+    .hero h1{font-size:clamp(3rem,8vw,6rem);font-weight:800;line-height:1.05;margin-bottom:1rem;letter-spacing:-.03em}
+    .hero h1 span{color:var(--accent)}
+    .hero-sub{font-size:clamp(1rem,2.5vw,1.3rem);color:var(--dim);max-width:600px;line-height:1.6;margin-bottom:2.5rem;font-weight:300}
+    .hero-stats{display:flex;gap:3rem;margin-bottom:3rem;flex-wrap:wrap;justify-content:center}
+    .stat-value{font-family:'JetBrains Mono',monospace;font-size:2rem;font-weight:700;color:var(--accent)}
+    .stat-label{font-size:.75rem;color:var(--dim);text-transform:uppercase;letter-spacing:.1em;margin-top:.25rem}
+    .cta-group{display:flex;gap:1rem;flex-wrap:wrap;justify-content:center}
+    .btn{padding:.9rem 2.5rem;border-radius:12px;font-size:.95rem;font-weight:600;text-decoration:none;transition:all .3s cubic-bezier(.34,1.56,.64,1);display:inline-flex;align-items:center;gap:.5rem;cursor:pointer;border:none;font-family:'Outfit',sans-serif}
+    .btn-primary{background:var(--accent);color:var(--bg);box-shadow:0 4px 20px rgba(0,212,255,.3)}
+    .btn-primary:hover{transform:translateY(-2px) scale(1.02);box-shadow:0 8px 30px rgba(0,212,255,.4)}
+    .btn-secondary{background:rgba(255,255,255,.05);color:var(--text);border:1px solid rgba(255,255,255,.1)}
+    .btn-secondary:hover{background:rgba(255,255,255,.1);border-color:var(--accent);transform:translateY(-2px)}
+    .scroll-hint{position:absolute;bottom:2rem;left:50%;transform:translateX(-50%);color:var(--dim);font-size:.7rem;text-transform:uppercase;letter-spacing:.2em;animation:bounce 2s ease-in-out infinite}
+    @keyframes bounce{0%,100%{transform:translateX(-50%) translateY(0)}50%{transform:translateX(-50%) translateY(6px)}}
+    section{padding:6rem 2rem;max-width:1200px;margin:0 auto}
+    .section-label{font-family:'JetBrains Mono',monospace;font-size:.7rem;color:var(--accent);text-transform:uppercase;letter-spacing:.2em;margin-bottom:.5rem}
+    .section-title{font-size:clamp(2rem,4vw,3rem);font-weight:800;margin-bottom:1rem;letter-spacing:-.02em}
+    .section-desc{color:var(--dim);font-size:1.1rem;max-width:600px;line-height:1.6;margin-bottom:3rem;font-weight:300}
+    .features-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1.5rem}
+    .feature-card{background:var(--surface);border:1px solid rgba(255,255,255,.05);border-radius:16px;padding:2rem;transition:all .3s;position:relative;overflow:hidden}
+    .feature-card::before{content:'';position:absolute;top:0;left:0;right:0;height:2px;background:linear-gradient(90deg,transparent,var(--card-accent,var(--accent)),transparent);opacity:0;transition:opacity .3s}
+    .feature-card:hover{border-color:rgba(255,255,255,.1);transform:translateY(-4px);box-shadow:0 20px 40px rgba(0,0,0,.3)}
+    .feature-card:hover::before{opacity:1}
+    .feature-icon{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:1.2rem}
+    .feature-card h3{font-size:1.1rem;font-weight:600;margin-bottom:.5rem}
+    .feature-card p{color:var(--dim);font-size:.85rem;line-height:1.6;font-weight:300}
+    .comparison{overflow-x:auto}
+    .comparison table{width:100%;border-collapse:collapse;font-size:.85rem}
+    .comparison th,.comparison td{padding:1rem 1.5rem;text-align:left;border-bottom:1px solid rgba(255,255,255,.05)}
+    .comparison th{font-family:'JetBrains Mono',monospace;font-size:.75rem;color:var(--dim);text-transform:uppercase;letter-spacing:.1em}
+    .comparison td:first-child{color:var(--dim)}
+    .nexus-col{color:var(--accent);font-weight:600}
+    .comparison tr:hover td{background:rgba(0,212,255,.03)}
+    .check{color:var(--accent3)}.cross{color:#ff3b5c}
+    .cta-section{text-align:center;padding:8rem 2rem;position:relative}
+    .cta-section::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,var(--glow),transparent 70%);pointer-events:none}
+    footer{text-align:center;padding:3rem 2rem;border-top:1px solid rgba(255,255,255,.05);color:var(--dim);font-size:.75rem}
+    footer a{color:var(--accent);text-decoration:none}footer a:hover{text-decoration:underline}
+    .tech-badges{display:flex;gap:.75rem;flex-wrap:wrap;justify-content:center;margin-top:2rem}
+    .badge{font-family:'JetBrains Mono',monospace;font-size:.65rem;padding:.4rem .8rem;border-radius:8px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);color:var(--dim);letter-spacing:.05em}
+    .fade-in{opacity:0;transform:translateY(20px);animation:fadeUp .8s ease forwards}
+    .fade-in:nth-child(2){animation-delay:.1s}.fade-in:nth-child(3){animation-delay:.2s}
+    .fade-in:nth-child(4){animation-delay:.3s}.fade-in:nth-child(5){animation-delay:.4s}
+    @keyframes fadeUp{to{opacity:1;transform:translateY(0)}}
+    @media(max-width:768px){.hero-stats{gap:1.5rem}.stat-value{font-size:1.5rem}.features-grid{grid-template-columns:1fr}.comparison th,.comparison td{padding:.6rem}}
+  </style>
+</head>
+<body>
+<div class="grid-bg"></div>
+<div class="content">
+
+  <section class="hero">
+    <div class="hero-orb"></div>
+    <div class="logo-mark fade-in">&#9889;</div>
+    <h1 class="fade-in">Nexus<span>IDE</span></h1>
+    <p class="hero-sub fade-in">L'IDE nouvelle g&eacute;n&eacute;ration. Construit en Rust, chiffr&eacute; par d&eacute;faut, propuls&eacute; par l'IA. Pas un clone &mdash; quelque chose de nouveau.</p>
+    <div class="hero-stats fade-in">
+      <div class="stat"><div class="stat-value">~30MB</div><div class="stat-label">RAM</div></div>
+      <div class="stat"><div class="stat-value">~8MB</div><div class="stat-label">Binaire</div></div>
+      <div class="stat"><div class="stat-value">&lt;500ms</div><div class="stat-label">Startup</div></div>
+      <div class="stat"><div class="stat-value">40+</div><div class="stat-label">Features</div></div>
+    </div>
+    <div class="cta-group fade-in">
+      <a href="#download" class="btn btn-primary">&#11015; Download v1.0.0</a>
+      <a href="#features" class="btn btn-secondary">Voir les features &darr;</a>
+    </div>
+    <div class="tech-badges fade-in">
+      <span class="badge">Tauri 2</span><span class="badge">Rust</span><span class="badge">React 18</span><span class="badge">CodeMirror 6</span><span class="badge">XChaCha20</span><span class="badge">Argon2id</span>
+    </div>
+    <div class="scroll-hint">&darr; scroll</div>
+  </section>
+
+  <section id="features">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">Tout ce dont vous avez besoin.<br>Rien de superflu.</h2>
+    <p class="section-desc">26 composants. 11 modules Rust. Z&eacute;ro Electron.</p>
+    <div class="features-grid">
+      <div class="feature-card fade-in" style="--card-accent:#00d4ff"><div class="feature-icon" style="background:rgba(0,212,255,.1);color:#00d4ff">&#128274;</div><h3>Obsidian Vault</h3><p>XChaCha20-Poly1305 + Argon2id. Cl&eacute;s verrouill&eacute;es en RAM. Z&eacute;roisation automatique. Audit SHA-256.</p></div>
+      <div class="feature-card fade-in" style="--card-accent:#a78bfa"><div class="feature-icon" style="background:rgba(167,139,250,.1);color:#a78bfa">&#129302;</div><h3>AI Copilot</h3><p>Chat IA int&eacute;gr&eacute; + AI Lens : s&eacute;lectionnez du code pour expliquer, refactorer ou fixer en un clic.</p></div>
+      <div class="feature-card fade-in" style="--card-accent:#34d399"><div class="feature-icon" style="background:rgba(52,211,153,.1);color:#34d399">&#127793;</div><h3>Git Natif</h3><p>Stage, commit, push, pull, branches, log, diff. Int&eacute;gr&eacute; en Rust, pas via extension.</p></div>
+      <div class="feature-card fade-in" style="--card-accent:#f97316"><div class="feature-icon" style="background:rgba(249,115,22,.1);color:#f97316">&#128027;</div><h3>Run &amp; Debug</h3><p>Python, C/C++, Rust, C#, Go, Node.js. Compile + ex&eacute;cute en un clic.</p></div>
+      <div class="feature-card fade-in" style="--card-accent:#f59e0b"><div class="feature-icon" style="background:rgba(245,158,11,.1);color:#f59e0b">&#128269;</div><h3>Global Search</h3><p>Recherche dans tout le projet. Replace All. Fuzzy finder. Skip auto des binaires.</p></div>
+      <div class="feature-card fade-in" style="--card-accent:#818cf8"><div class="feature-icon" style="background:rgba(129,140,248,.1);color:#818cf8">&#128230;</div><h3>Extensions</h3><p>D&eacute;tecte auto les outils. Installe debuggers et formatters en un clic.</p></div>
+      <div class="feature-card fade-in" style="--card-accent:#ec4899"><div class="feature-icon" style="background:rgba(236,72,153,.1);color:#ec4899">&#9889;</div><h3>Performance</h3><p>Rust natif. ~8MB vs 300MB+. ~30MB RAM vs 350MB. Startup &lt;500ms.</p></div>
+      <div class="feature-card fade-in" style="--card-accent:#6ee7b7"><div class="feature-icon" style="background:rgba(110,231,183,.1);color:#6ee7b7">&#128187;</div><h3>Terminal Natif</h3><p>PTY natif. PowerShell/Bash. Z&eacute;ro Node.js.</p></div>
+      <div class="feature-card fade-in" style="--card-accent:#fbbf24"><div class="feature-icon" style="background:rgba(251,191,36,.1);color:#fbbf24">&#128221;</div><h3>200+ Snippets</h3><p>JS, TS, React, Python, Rust, HTML, CSS, C/C++, C#. Ctrl+J.</p></div>
+    </div>
+  </section>
+
+  <section>
+    <div class="section-label">Comparaison</div>
+    <h2 class="section-title">NexusIDE vs. le reste</h2>
+    <div class="comparison"><table>
+      <thead><tr><th>M&eacute;trique</th><th>VS Code</th><th>Cursor</th><th class="nexus-col">NexusIDE</th></tr></thead>
+      <tbody>
+        <tr><td>Backend</td><td>Electron</td><td>Electron</td><td class="nexus-col">Tauri 2 (Rust)</td></tr>
+        <tr><td>RAM</td><td>300MB</td><td>350MB</td><td class="nexus-col">~30MB</td></tr>
+        <tr><td>Binaire</td><td>300MB+</td><td>400MB+</td><td class="nexus-col">~8MB</td></tr>
+        <tr><td>Startup</td><td>2-3s</td><td>3-4s</td><td class="nexus-col">&lt;500ms</td></tr>
+        <tr><td>Chiffrement</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003; XChaCha20</td></tr>
+        <tr><td>Git</td><td>Extension</td><td>Partiel</td><td class="check">&#10003; Natif</td></tr>
+        <tr><td>Debug</td><td>Extension</td><td>Extension</td><td class="check">&#10003; Int&eacute;gr&eacute;</td></tr>
+        <tr><td>Secrets</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003; Scanner</td></tr>
+        <tr><td>Large files</td><td class="cross">&#10007;</td><td class="cross">&#10007;</td><td class="check">&#10003; mmap</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="cta-section" id="download">
+    <div class="section-label">Download</div>
+    <h2 class="section-title">Pr&ecirc;t &agrave; coder autrement ?</h2>
+    <p class="section-desc" style="margin:0 auto 2rem">NexusIDE v1.0.0 &mdash; Windows 10/11 (x64)</p>
+    <div class="cta-group">
+      <a href="https://github.com/devliegeralexandre345-del/nexus-ide-releases/releases/download/v1.0.0/NexusIDE_1.0.0_x64-setup.exe" class="btn btn-primary">&#11015; Windows Installer (.exe)</a>
+      <a href="https://github.com/devliegeralexandre345-del/nexus-ide-releases/releases/download/v1.0.0/NexusIDE_1.0.0_x64_en-US.msi" class="btn btn-secondary">Windows MSI</a>
+    </div>
+    <p style="color:var(--dim);font-size:.75rem;margin-top:1.5rem">macOS &amp; Linux &mdash; bient&ocirc;t.</p>
+  </section>
+
+  <footer><p>&copy; 2025 NexusIDE &mdash; Built with &#9889; Rust + Tauri 2</p></footer>
+</div>
+<script>
+const o=new IntersectionObserver(e=>{e.forEach(e=>{e.isIntersecting&&(e.target.style.animationPlayState='running')})},{threshold:.1});
+document.querySelectorAll('.fade-in').forEach(e=>{e.style.animationPlayState='paused';o.observe(e)});
+document.querySelectorAll('a[href^="#"]').forEach(a=>{a.addEventListener('click',e=>{e.preventDefault();document.querySelector(a.getAttribute('href'))?.scrollIntoView({behavior:'smooth'})})});
+</script>
+</body>
+</html>

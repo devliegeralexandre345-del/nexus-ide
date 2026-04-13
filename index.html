@@ -57,6 +57,16 @@
     .check{color:var(--accent3)}.cross{color:#ff3b5c}
     .cta-section{text-align:center;padding:8rem 2rem;position:relative}
     .cta-section::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at center,var(--glow),transparent 70%);pointer-events:none}
+    .dl-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1rem;max-width:900px;margin:0 auto 2rem;text-align:left}
+    .dl-card{background:var(--surface);border:1px solid rgba(255,255,255,.07);border-radius:14px;padding:1.4rem 1.6rem;display:flex;flex-direction:column;gap:.6rem;transition:all .25s}
+    .dl-card:hover{border-color:var(--accent);transform:translateY(-3px);box-shadow:0 12px 30px rgba(0,0,0,.3)}
+    .dl-os{font-size:.65rem;font-family:'JetBrains Mono',monospace;text-transform:uppercase;letter-spacing:.12em;color:var(--dim)}
+    .dl-name{font-size:.95rem;font-weight:600}
+    .dl-links{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:.2rem}
+    .dl-btn{font-family:'JetBrains Mono',monospace;font-size:.7rem;padding:.35rem .8rem;border-radius:7px;text-decoration:none;border:1px solid rgba(255,255,255,.1);color:var(--text);background:rgba(255,255,255,.04);transition:all .2s;white-space:nowrap}
+    .dl-btn:hover{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+    .dl-btn.primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+    .dl-btn.primary:hover{box-shadow:0 0 18px rgba(0,212,255,.4)}
     footer{text-align:center;padding:3rem 2rem;border-top:1px solid rgba(255,255,255,.05);color:var(--dim);font-size:.75rem}
     footer a{color:var(--accent);text-decoration:none}footer a:hover{text-decoration:underline}
     .tech-badges{display:flex;gap:.75rem;flex-wrap:wrap;justify-content:center;margin-top:2rem}
@@ -84,7 +94,7 @@
       <div class="stat"><div class="stat-value">40+</div><div class="stat-label">Features</div></div>
     </div>
     <div class="cta-group fade-in">
-      <a href="#download" class="btn btn-primary">&#11015; Download v1.0.0</a>
+      <a href="#download" class="btn btn-primary">&#11015; Download v1.1.0</a>
       <a href="#features" class="btn btn-secondary">Voir les features &darr;</a>
     </div>
     <div class="tech-badges fade-in">
@@ -132,12 +142,44 @@
   <section class="cta-section" id="download">
     <div class="section-label">Download</div>
     <h2 class="section-title">Pr&ecirc;t &agrave; coder autrement ?</h2>
-    <p class="section-desc" style="margin:0 auto 2rem">NexusIDE v1.0.0 &mdash; Windows 10/11 (x64)</p>
-    <div class="cta-group">
-      <a href="https://github.com/devliegeralexandre345-del/nexus-ide/releases/download/v1.0.0/NexusIDE_1.0.0_x64-setup.exe" class="btn btn-primary">&#11015; Windows Installer (.exe)</a>
-      <a href="https://github.com/devliegeralexandre345-del/nexus-ide/releases/download/v1.0.0/NexusIDE_1.0.0_x64_en-US.msi" class="btn btn-secondary">Windows MSI</a>
+    <p class="section-desc" style="margin:0 auto 2rem">NexusIDE v1.1.0 &mdash; Windows &amp; Linux (x64)</p>
+    <div class="dl-grid">
+
+      <div class="dl-card">
+        <div class="dl-os">Windows 10 / 11 &mdash; x64</div>
+        <div class="dl-name">&#129695; Windows</div>
+        <div class="dl-links">
+          <a href="https://github.com/devliegeralexandre345-del/nexus-ide/releases/download/v1.1.0/NexusIDE_1.1.0_x64-setup.exe" class="dl-btn primary">&#11015; .exe</a>
+          <a href="https://github.com/devliegeralexandre345-del/nexus-ide/releases/download/v1.1.0/NexusIDE_1.1.0_x64_en-US.msi" class="dl-btn">.msi</a>
+        </div>
+      </div>
+
+      <div class="dl-card">
+        <div class="dl-os">Debian / Ubuntu &mdash; x64</div>
+        <div class="dl-name">&#128032; Linux .deb</div>
+        <div class="dl-links">
+          <a href="https://github.com/devliegeralexandre345-del/nexus-ide/releases/download/v1.1.0/NexusIDE_1.1.0_amd64.deb" class="dl-btn primary">&#11015; .deb</a>
+        </div>
+      </div>
+
+      <div class="dl-card">
+        <div class="dl-os">Fedora / RHEL &mdash; x64</div>
+        <div class="dl-name">&#128032; Linux .rpm</div>
+        <div class="dl-links">
+          <a href="https://github.com/devliegeralexandre345-del/nexus-ide/releases/download/v1.1.0/NexusIDE_1.1.0-1.x86_64.rpm" class="dl-btn primary">&#11015; .rpm</a>
+        </div>
+      </div>
+
+      <div class="dl-card">
+        <div class="dl-os">Toutes distributions &mdash; x64</div>
+        <div class="dl-name">&#128032; Linux universel</div>
+        <div class="dl-links">
+          <a href="https://github.com/devliegeralexandre345-del/nexus-ide/releases/download/v1.1.0/NexusIDE_1.1.0_amd64.AppImage" class="dl-btn primary">&#11015; .AppImage</a>
+        </div>
+      </div>
+
     </div>
-    <p style="color:var(--dim);font-size:.75rem;margin-top:1.5rem">macOS &amp; Linux &mdash; bient&ocirc;t.</p>
+    <p style="color:var(--dim);font-size:.75rem;margin-top:.5rem">macOS &mdash; bient&ocirc;t.</p>
   </section>
 
   <footer><p>&copy; 2025 NexusIDE &mdash; Built with &#9889; Rust + Tauri 2</p></footer>

@@ -1,0 +1,70 @@
+{
+  "$schema": "https://raw.githubusercontent.com/tauri-apps/tauri/dev/crates/tauri-config-schema/schema.json",
+  "productName": "Lorica",
+  "version": "2.0.0",
+  "identifier": "com.lorica.app",
+  "build": {
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "Lorica",
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 1024,
+        "minHeight": 700,
+        "decorations": false,
+        "transparent": false,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' tauri: ipc: https://open.spotify.com https://accounts.spotify.com https://*.scdn.co; connect-src 'self' https://accounts.spotify.com https://api.spotify.com https://*.scdn.co; img-src 'self' data: https://*.scdn.co https://i.scdn.co https://mosaic.scdn.co https://lineup-images.scdn.co https://seeded-session-images.scdn.co https://charts-images.scdn.co; media-src https://*.scdn.co https://*.spotify.com; frame-src https://open.spotify.com; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'unsafe-eval';"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.ico",
+      "icons/icon.png"
+    ],
+    "resources": [],
+    "copyright": "© 2025 Lorica",
+    "shortDescription": "Secure AI-Powered Native IDE",
+    "longDescription": "Lorica is a next-generation IDE built with Tauri 2 and Rust. Features include integrated Git, AI Copilot, encrypted secret vault, multi-language debugging, and a futuristic glassmorphism UI.",
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": null,
+        "sidebarImage": null,
+        "installMode": "currentUser",
+        "languages": ["English", "French"]
+      }
+    },
+    "linux": {
+      "deb": {
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libayatana-appindicator3-1"
+        ]
+      },
+      "appimage": {}
+    }
+  },
+  "plugins": {}
+}

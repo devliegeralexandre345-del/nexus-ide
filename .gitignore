@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+src-tauri/target/
+
+# Environment
+.env
+.env.local
+
+# Docs internes (non nécessaires dans le repo public)
+MIGRATION_GUIDE.md
+NEXUS_ENGINE_ARCHITECTURE.md
+SPOTIFY_OAUTH_FIXES.md
+implementation_plan.md
+todo_checklist.md
+rename_script.ps1
+
+# Brainstorm / outils
+.superpowers/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+
+# Backups
+*.backup
+*.bak
+
+# Logs
+*.log

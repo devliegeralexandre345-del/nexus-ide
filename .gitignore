@@ -20,6 +20,9 @@ rename_script.ps1
 # Brainstorm / outils
 .superpowers/
 
+# Git worktrees
+.worktrees/
+
 # OS
 .DS_Store
 Thumbs.db

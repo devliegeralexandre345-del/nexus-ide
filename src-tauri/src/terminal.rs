@@ -160,3 +160,43 @@ pub fn cmd_terminal_kill(state: tauri::State<AppState>) -> CmdResult<bool> {
     manager.instances.clear(); // Drops writers + masters, closing the PTY
     CmdResult::ok(true)
 }
+
+#[derive(serde::Serialize, serde::Deserialize)]
+pub struct CommandOutput {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+    pub success: bool,
+}
+
+#[tauri::command]
+pub fn cmd_run_command(command: String, cwd: Option<String>) -> CmdResult<CommandOutput> {
+    let shell = if cfg!(target_os = "windows") {
+        "cmd"
+    } else {
+        "sh"
+    };
+    let shell_flag = if cfg!(target_os = "windows") { "/C" } else { "-c" };
+
+    let mut cmd = std::process::Command::new(shell);
+    cmd.arg(shell_flag).arg(&command);
+
+    if let Some(dir) = &cwd {
+        cmd.current_dir(dir);
+    }
+
+    match cmd.output() {
+        Ok(output) => {
+            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            let exit_code = output.status.code().unwrap_or(-1);
+            CmdResult::ok(CommandOutput {
+                stdout,
+                stderr,
+                exit_code,
+                success: output.status.success(),
+            })
+        }
+        Err(e) => CmdResult::err(format!("Failed to run command: {}", e)),
+    }
+}

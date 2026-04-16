@@ -62,6 +62,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             terminal::cmd_terminal_write,
             terminal::cmd_terminal_resize,
             terminal::cmd_terminal_kill,
+            terminal::cmd_run_command,
             // Buffer
             buffer::cmd_open_large_file,
             buffer::cmd_get_lines,

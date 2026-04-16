@@ -124,6 +124,7 @@ const terminal = {
   write: (data) => safeInvoke('cmd_terminal_write', { data }),
   resize: (cols, rows) => safeInvoke('cmd_terminal_resize', { cols, rows }),
   kill: () => safeInvoke('cmd_terminal_kill'),
+  runCommand: (command, cwd) => safeInvoke('cmd_run_command', { command, cwd }),
   onData: async (callback) => {
     // Clean up previous listener
     if (terminalUnlisten) {

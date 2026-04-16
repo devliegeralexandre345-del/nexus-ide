@@ -12,7 +12,8 @@ import FileTree from './components/FileTree';
 import TabBar from './components/TabBar';
 import Editor from './components/Editor';
 import Terminal from './components/Terminal';
-import AICopilot from './components/AICopilot';
+import AgentCopilot from './components/AgentCopilot';
+import { useAgent } from './hooks/useAgent';
 import SpotifyPlayer from './components/SpotifyPlayer';
 import CommandPalette from './components/CommandPalette';
 import StatusBar from './components/StatusBar';
@@ -45,6 +46,7 @@ export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialState);
   const fs = useFileSystem(dispatch);
   const ai = useAI(state, dispatch);
+  const agent = useAgent(state, dispatch);
   const security = useSecurity(state, dispatch);
   const spotify = useSpotify();
   const update = useUpdate(dispatch);
@@ -312,7 +314,7 @@ export default function App() {
           <>
             <div className="w-1 cursor-col-resize resize-handle bg-lorica-border hover:bg-lorica-accent flex-shrink-0" onMouseDown={handleAIResize} />
             <div style={{ width: aiPanelWidth }} className="flex-shrink-0 border-l border-lorica-border bg-lorica-surface overflow-hidden flex flex-col">
-              <AICopilot state={state} dispatch={dispatch} ai={ai} activeFile={activeFile} />
+              <AgentCopilot state={state} dispatch={dispatch} agent={agent} activeFile={activeFile} />
               {state.showSpotify && (
                 <div className="border-t border-lorica-border flex-shrink-0"><SpotifyPlayer spotify={spotify} /></div>
               )}

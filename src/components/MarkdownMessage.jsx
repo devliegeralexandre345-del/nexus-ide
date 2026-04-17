@@ -4,7 +4,31 @@ import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-export default function MarkdownMessage({ content, isStreaming }) {
+// Lightweight code renderer used during streaming — NO syntax highlighting.
+// Prism is extremely expensive (full tokenizer + theme) and running it on every
+// text delta at 50+ fps freezes the main thread. Once streaming finishes we swap
+// to the real highlighter.
+function PlainCode({ language, children }) {
+  return (
+    <pre
+      className="my-2 rounded-md overflow-auto text-[11px] font-mono"
+      style={{
+        background: 'var(--color-bg, #111)',
+        border: '1px solid var(--color-border, #333)',
+        padding: '0.5rem 0.75rem',
+      }}
+    >
+      <code>{String(children).replace(/\n$/, '')}</code>
+      {language && (
+        <span className="block text-[9px] text-lorica-textDim/60 mt-1">
+          {language}
+        </span>
+      )}
+    </pre>
+  );
+}
+
+function MarkdownMessageInner({ content, isStreaming }) {
   return (
     <div className="text-xs text-lorica-text leading-relaxed markdown-agent">
       <ReactMarkdown
@@ -12,6 +36,10 @@ export default function MarkdownMessage({ content, isStreaming }) {
           code({ node, inline, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || '');
             if (!inline && match) {
+              // During streaming use the plain renderer (much cheaper).
+              if (isStreaming) {
+                return <PlainCode language={match[1]}>{children}</PlainCode>;
+              }
               return (
                 <SyntaxHighlighter
                   style={vscDarkPlus}
@@ -87,3 +115,12 @@ export default function MarkdownMessage({ content, isStreaming }) {
     </div>
   );
 }
+
+// Memoized — only re-renders when content or streaming flag actually changes.
+// Completed past messages never re-render on every token of the active one.
+const MarkdownMessage = React.memo(
+  MarkdownMessageInner,
+  (prev, next) => prev.content === next.content && prev.isStreaming === next.isStreaming,
+);
+
+export default MarkdownMessage;

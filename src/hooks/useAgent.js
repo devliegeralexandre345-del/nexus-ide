@@ -58,6 +58,27 @@ export function useAgent(state, dispatch) {
   const abortRef = useRef(null);
   const approvalRef = useRef({});
   const lastUserMessageRef = useRef(null);
+  // Stream buffering — avoid dispatching per token (freezes UI with Markdown+Prism).
+  const streamBufRef = useRef('');
+  const rafPendingRef = useRef(false);
+
+  const flushStream = useCallback(() => {
+    rafPendingRef.current = false;
+    const text = streamBufRef.current;
+    if (!text) return;
+    streamBufRef.current = '';
+    dispatch({ type: 'AGENT_APPEND_STREAM', text });
+  }, [dispatch]);
+
+  const queueStreamAppend = useCallback((text) => {
+    streamBufRef.current += text;
+    if (!rafPendingRef.current) {
+      rafPendingRef.current = true;
+      // rAF keeps updates in lockstep with the browser paint (≈60fps instead of
+      // 500+ token dispatches/sec) — the UI stays responsive to clicks/scroll.
+      requestAnimationFrame(flushStream);
+    }
+  }, [flushStream]);
 
   const approveToolCall = useCallback((id) => {
     approvalRef.current[id]?.resolve(true);
@@ -71,6 +92,12 @@ export function useAgent(state, dispatch) {
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
+    // Flush any text still buffered so it isn't orphaned in the next run.
+    if (streamBufRef.current) {
+      const text = streamBufRef.current;
+      streamBufRef.current = '';
+      dispatch({ type: 'AGENT_APPEND_STREAM', text });
+    }
     dispatch({ type: 'AGENT_SET_LOADING', value: false });
   }, [dispatch]);
 
@@ -281,7 +308,7 @@ export function useAgent(state, dispatch) {
         } else if (ev.type === 'content_block_delta') {
           if (ev.delta.type === 'text_delta') {
             textContent += ev.delta.text;
-            dispatch({ type: 'AGENT_APPEND_STREAM', text: ev.delta.text });
+            queueStreamAppend(ev.delta.text);
           } else if (ev.delta.type === 'input_json_delta' && activeToolIdx >= 0) {
             toolUses[activeToolIdx].inputAccum += ev.delta.partial_json;
           }
@@ -306,6 +333,9 @@ export function useAgent(state, dispatch) {
         }
       }
     }
+
+    // Flush any pending buffered text before finishing the stream.
+    if (streamBufRef.current) flushStream();
 
     return { textContent, toolUses, stopReason, usage };
   }
@@ -348,7 +378,7 @@ export function useAgent(state, dispatch) {
 
         if (delta.content) {
           textContent += delta.content;
-          dispatch({ type: 'AGENT_APPEND_STREAM', text: delta.content });
+          queueStreamAppend(delta.content);
         }
 
         if (delta.tool_calls) {
@@ -402,6 +432,9 @@ export function useAgent(state, dispatch) {
         updates: { input: tu.input, name: tu.name },
       });
     }
+
+    // Flush any pending buffered text before finishing.
+    if (streamBufRef.current) flushStream();
 
     return {
       textContent,
@@ -754,6 +787,12 @@ You have direct access to the user's codebase via tools. Be concise, precise, an
         });
       }
     } finally {
+      // Guarantee any buffered stream text is flushed to state before we stop loading.
+      if (streamBufRef.current) {
+        const text = streamBufRef.current;
+        streamBufRef.current = '';
+        dispatch({ type: 'AGENT_APPEND_STREAM', text });
+      }
       dispatch({ type: 'AGENT_SET_LOADING', value: false });
     }
   }, [state.aiApiKey, state.aiDeepseekKey, state.aiProvider, state.agentConfig, state.agentMessages, state.projectPath, dispatch]);

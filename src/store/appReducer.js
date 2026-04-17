@@ -52,8 +52,9 @@ export const initialState = {
   // Agent Copilot
   agentMessages: [],        // [{ id, role, content, toolCalls }]
   agentLoading: false,
-  agentConfig: null,        // { context, permissions, autoApprove }
+  agentConfig: null,        // { context, permissions, autoApprove, model }
   agentSessionActive: false,
+  agentUsage: null,         // { input_tokens, output_tokens, prompt_tokens, completion_tokens, total_tokens }
 
   // Spotify
   spotifyTrack: null,
@@ -193,8 +194,24 @@ export function appReducer(state, action) {
     }
     case 'AGENT_SET_LOADING':
       return { ...state, agentLoading: action.value };
+    case 'AGENT_SET_MESSAGES':
+      return { ...state, agentMessages: action.messages };
+    case 'AGENT_UPDATE_USAGE': {
+      const prev = state.agentUsage || {};
+      const next = action.usage || {};
+      // Merge cumulatively (sum input/output tokens from multiple turns)
+      const merged = { ...prev };
+      for (const [k, v] of Object.entries(next)) {
+        if (typeof v === 'number') {
+          merged[k] = (prev[k] || 0) + v;
+        } else {
+          merged[k] = v;
+        }
+      }
+      return { ...state, agentUsage: merged };
+    }
     case 'AGENT_CLEAR':
-      return { ...state, agentMessages: [], agentLoading: false, agentSessionActive: false, agentConfig: null };
+      return { ...state, agentMessages: [], agentLoading: false, agentSessionActive: false, agentConfig: null, agentUsage: null };
     case 'SET_AI_KEY':
       return { ...state, aiApiKey: action.key };
     case 'SET_AI_PROVIDER':

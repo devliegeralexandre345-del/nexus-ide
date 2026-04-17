@@ -1,6 +1,6 @@
 // src/components/AgentCopilot.jsx
 import React, { useState, useRef, useEffect } from 'react';
-import { Bot, Send, Square, Plus, Trash2, Loader2 } from 'lucide-react';
+import { Bot, Send, Square, Plus, Trash2, Loader2, RefreshCw, Activity } from 'lucide-react';
 import AgentConfigModal from './AgentConfigModal';
 import AgentToolBlock from './AgentToolBlock';
 import MarkdownMessage from './MarkdownMessage';
@@ -41,6 +41,7 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
         <AgentConfigModal
           onStart={handleStart}
           onCancel={() => setShowConfig(false)}
+          provider={state.aiProvider || 'anthropic'}
         />
       )}
 
@@ -57,6 +58,13 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
           {state.aiProvider === 'anthropic' ? 'Claude' : 'DeepSeek'}
         </span>
 
+        {/* Model badge */}
+        {state.agentConfig?.model && (
+          <span className="text-[9px] text-lorica-textDim/80 truncate max-w-[120px]" title={state.agentConfig.model}>
+            {state.agentConfig.model.replace(/^claude-|^deepseek-/, '')}
+          </span>
+        )}
+
         <div className="flex items-center gap-1 ml-auto">
           {state.agentLoading && (
             <button
@@ -68,13 +76,22 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
             </button>
           )}
           {!state.agentLoading && state.agentMessages.length > 0 && (
-            <button
-              onClick={() => dispatch({ type: 'AGENT_CLEAR' })}
-              className="p-1 rounded text-lorica-textDim hover:text-lorica-text transition-colors"
-              title="Vider le chat"
-            >
-              <Trash2 size={12} />
-            </button>
+            <>
+              <button
+                onClick={agent.retryLastMessage}
+                className="p-1 rounded text-lorica-textDim hover:text-lorica-accent transition-colors"
+                title="Ré-envoyer le dernier message"
+              >
+                <RefreshCw size={12} />
+              </button>
+              <button
+                onClick={() => dispatch({ type: 'AGENT_CLEAR' })}
+                className="p-1 rounded text-lorica-textDim hover:text-lorica-text transition-colors"
+                title="Vider le chat"
+              >
+                <Trash2 size={12} />
+              </button>
+            </>
           )}
           <button
             onClick={handleNewChat}
@@ -173,6 +190,24 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
               <Send size={14} />
             </button>
           </div>
+
+          {/* Usage footer */}
+          {state.agentUsage && (
+            <div className="flex items-center gap-2 mt-1.5 px-1 text-[9px] text-lorica-textDim/70">
+              <Activity size={9} />
+              {(() => {
+                const u = state.agentUsage;
+                const input = u.input_tokens ?? u.prompt_tokens ?? 0;
+                const output = u.output_tokens ?? u.completion_tokens ?? 0;
+                const total = u.total_tokens ?? (input + output);
+                return (
+                  <span>
+                    {input.toLocaleString()} in · {output.toLocaleString()} out · {total.toLocaleString()} total
+                  </span>
+                );
+              })()}
+            </div>
+          )}
         </div>
       )}
     </div>

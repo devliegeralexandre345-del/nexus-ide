@@ -4,7 +4,13 @@ import { fetch as tauriFetch } from '@tauri-apps/plugin-http';
 import { buildToolsForPermissions, NON_DESTRUCTIVE_TOOLS } from '../utils/agentTools';
 
 const ANTHROPIC_ENDPOINT = 'https://api.anthropic.com/v1/messages';
-const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/chat/completions';
+const DEEPSEEK_ENDPOINT = 'https://api.deepseek.com/v1/chat/completions';
+
+// Default models per provider (overridable via state.agentConfig.model)
+const DEFAULT_MODELS = {
+  anthropic: 'claude-sonnet-4-20250514',
+  deepseek: 'deepseek-chat',
+};
 
 // Convert Anthropic-style tool defs to OpenAI/DeepSeek format
 function toOpenAITools(anthropicTools) {
@@ -18,9 +24,40 @@ function toOpenAITools(anthropicTools) {
   }));
 }
 
+// --- Fetch strategy selector ---
+// DeepSeek allows browser CORS, so native fetch works and streams well.
+// Anthropic requires the dangerous-direct-browser-access header + sometimes blocks — route through Tauri.
+// If native fetch fails for DeepSeek, we fall back to tauriFetch.
+async function robustFetch(url, opts, preferNative) {
+  // Strip Tauri-specific options
+  const init = { ...opts };
+  if (preferNative) {
+    try {
+      return await fetch(url, init);
+    } catch (e) {
+      // Fall back to Tauri HTTP plugin
+      try {
+        return await tauriFetch(url, init);
+      } catch (e2) {
+        throw new Error(`Native fetch failed (${e.message}); Tauri fetch also failed (${e2.message})`);
+      }
+    }
+  }
+  try {
+    return await tauriFetch(url, init);
+  } catch (e) {
+    try {
+      return await fetch(url, init);
+    } catch (e2) {
+      throw new Error(`Tauri fetch failed (${e.message}); native fetch also failed (${e2.message})`);
+    }
+  }
+}
+
 export function useAgent(state, dispatch) {
   const abortRef = useRef(null);
   const approvalRef = useRef({});
+  const lastUserMessageRef = useRef(null);
 
   const approveToolCall = useCallback((id) => {
     approvalRef.current[id]?.resolve(true);
@@ -143,7 +180,7 @@ export function useAgent(state, dispatch) {
         }
         case 'fetch_url': {
           try {
-            const resp = await tauriFetch(toolCall.input.url);
+            const resp = await robustFetch(toolCall.input.url, {}, true);
             const text = await resp.text();
             result = text.length > 8000 ? text.slice(0, 8000) + '\n[truncated]' : text;
           } catch (e) {
@@ -204,6 +241,7 @@ export function useAgent(state, dispatch) {
     const toolUses = [];
     let stopReason = null;
     let activeToolIdx = -1;
+    let usage = null;
 
     dispatch({ type: 'AGENT_ADD_MESSAGE', message: { role: 'assistant', content: '', toolCalls: [] } });
 
@@ -262,11 +300,14 @@ export function useAgent(state, dispatch) {
           }
         } else if (ev.type === 'message_delta') {
           stopReason = ev.delta?.stop_reason || stopReason;
+          if (ev.usage) usage = { ...(usage || {}), ...ev.usage };
+        } else if (ev.type === 'message_start' && ev.message?.usage) {
+          usage = { ...(usage || {}), ...ev.message.usage };
         }
       }
     }
 
-    return { textContent, toolUses, stopReason };
+    return { textContent, toolUses, stopReason, usage };
   }
 
   // --- OpenAI/DeepSeek SSE parser ---
@@ -276,9 +317,10 @@ export function useAgent(state, dispatch) {
     let buffer = '';
 
     let textContent = '';
-    const toolUses = []; // keyed by index
-    const toolByIndex = {}; // index -> toolUses entry
+    const toolUses = [];
+    const toolByIndex = {};
     let finishReason = null;
+    let usage = null;
 
     dispatch({ type: 'AGENT_ADD_MESSAGE', message: { role: 'assistant', content: '', toolCalls: [] } });
 
@@ -296,6 +338,8 @@ export function useAgent(state, dispatch) {
         if (raw === '[DONE]') continue;
         let ev;
         try { ev = JSON.parse(raw); } catch { continue; }
+
+        if (ev.usage) usage = ev.usage;
 
         const choice = ev.choices?.[0];
         if (!choice) continue;
@@ -363,10 +407,56 @@ export function useAgent(state, dispatch) {
       textContent,
       toolUses,
       stopReason: finishReason === 'tool_calls' ? 'tool_use' : finishReason,
+      usage,
     };
   }
 
-  const sendMessage = useCallback(async (userMessage, activeFile) => {
+  // --- Non-streaming DeepSeek fallback (used when stream fails) ---
+  async function callDeepSeekNonStreaming(apiMessages, tools, model, apiKey, signal) {
+    const body = {
+      model,
+      max_tokens: 4096,
+      stream: false,
+      messages: apiMessages,
+    };
+    if (tools && tools.length > 0) body.tools = tools;
+
+    // Try native fetch first (DeepSeek allows CORS)
+    let response;
+    try {
+      response = await fetch(DEEPSEEK_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal,
+      });
+    } catch (nativeErr) {
+      // Fall back to Tauri
+      response = await tauriFetch(DEEPSEEK_ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(body),
+        signal,
+      });
+    }
+    if (!response.ok) {
+      let errMsg = `HTTP ${response.status} ${response.statusText}`;
+      try {
+        const err = await response.json();
+        errMsg = err.error?.message || err.message || errMsg;
+      } catch {}
+      throw new Error(errMsg);
+    }
+    return response.json();
+  }
+
+  const runAgentLoop = useCallback(async (userMessage, activeFile) => {
     const provider = state.aiProvider || 'anthropic';
     const apiKey = provider === 'anthropic' ? state.aiApiKey : state.aiDeepseekKey;
     const providerLabel = provider === 'anthropic' ? 'Anthropic' : 'DeepSeek';
@@ -379,12 +469,15 @@ export function useAgent(state, dispatch) {
       return;
     }
 
+    lastUserMessageRef.current = { userMessage, activeFile };
+
     const config = state.agentConfig;
+    const model = config?.model || DEFAULT_MODELS[provider];
     const projectPath = state.projectPath;
     const tools = buildToolsForPermissions(config.permissions);
     const systemPrompt = `You are Lorica Agent, an expert AI embedded in the Lorica IDE. You have direct access to the user's codebase via tools. Be concise, precise, and always use tools to read files before modifying them. Project path: ${projectPath || 'unknown'}.`;
 
-    // Build message history in a neutral form, then convert per-provider at fetch time
+    // Build message history in a neutral form
     const history = [];
 
     const ctxText = await buildInitialContext(config, activeFile, projectPath);
@@ -419,9 +512,12 @@ export function useAgent(state, dispatch) {
       while (true) {
         let response;
         let parseStreamFn;
+        let requestBody;
+        let endpoint;
+        let headers;
+        let preferNativeFetch;
 
         if (provider === 'anthropic') {
-          // Anthropic format
           const apiMessages = [];
           for (const h of history) {
             if (h.role === 'user') {
@@ -438,25 +534,23 @@ export function useAgent(state, dispatch) {
             }
           }
 
-          response = await tauriFetch(ANTHROPIC_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'x-api-key': apiKey,
-              'anthropic-version': '2023-06-01',
-              'anthropic-dangerous-direct-browser-access': 'true',
-            },
-            body: JSON.stringify({
-              model: 'claude-sonnet-4-20250514',
-              max_tokens: 8096,
-              stream: true,
-              tools: tools.length > 0 ? tools : undefined,
-              system: systemPrompt,
-              messages: apiMessages,
-            }),
-            signal: controller.signal,
-          });
+          endpoint = ANTHROPIC_ENDPOINT;
+          headers = {
+            'Content-Type': 'application/json',
+            'x-api-key': apiKey,
+            'anthropic-version': '2023-06-01',
+            'anthropic-dangerous-direct-browser-access': 'true',
+          };
+          requestBody = {
+            model,
+            max_tokens: 8096,
+            stream: true,
+            tools: tools.length > 0 ? tools : undefined,
+            system: systemPrompt,
+            messages: apiMessages,
+          };
           parseStreamFn = parseAnthropicStream;
+          preferNativeFetch = false; // Anthropic often blocks direct browser — prefer Tauri HTTP
         } else {
           // DeepSeek / OpenAI-compatible format
           const apiMessages = [{ role: 'system', content: systemPrompt }];
@@ -484,22 +578,124 @@ export function useAgent(state, dispatch) {
             }
           }
 
-          response = await tauriFetch(DEEPSEEK_ENDPOINT, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${apiKey}`,
-            },
-            body: JSON.stringify({
-              model: 'deepseek-chat',
-              max_tokens: 4096,
-              stream: true,
-              tools: tools.length > 0 ? toOpenAITools(tools) : undefined,
-              messages: apiMessages,
-            }),
-            signal: controller.signal,
-          });
+          endpoint = DEEPSEEK_ENDPOINT;
+          headers = {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${apiKey}`,
+          };
+          requestBody = {
+            model,
+            max_tokens: 4096,
+            stream: true,
+            tools: tools.length > 0 ? toOpenAITools(tools) : undefined,
+            messages: apiMessages,
+          };
           parseStreamFn = parseOpenAIStream;
+          preferNativeFetch = true; // DeepSeek supports CORS — native fetch is faster and more reliable
+        }
+
+        // ── Attempt streaming request ──
+        let streamError = null;
+        try {
+          response = await robustFetch(endpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(requestBody),
+            signal: controller.signal,
+          }, preferNativeFetch);
+        } catch (e) {
+          streamError = e;
+        }
+
+        // ── Fallback: if stream failed or response is not ok/streamable, try non-streaming for DeepSeek ──
+        if (provider === 'deepseek' && (streamError || !response || !response.ok)) {
+          if (streamError) {
+            console.warn('[agent] DeepSeek stream fetch failed, falling back to non-streaming:', streamError);
+          } else if (!response.ok) {
+            let errText = response.statusText;
+            try {
+              const e = await response.json();
+              errText = e.error?.message || e.message || errText;
+            } catch {}
+            // Auth or validation errors — don't try non-streaming
+            if (response.status === 401 || response.status === 403 || response.status === 400) {
+              dispatch({
+                type: 'AGENT_ADD_MESSAGE',
+                message: { role: 'assistant', content: `❌ DeepSeek API Error (${response.status}): ${errText}` },
+              });
+              break;
+            }
+            console.warn('[agent] DeepSeek stream returned', response.status, '— trying non-streaming');
+          }
+
+          try {
+            const apiMessages = requestBody.messages;
+            const data = await callDeepSeekNonStreaming(
+              apiMessages,
+              requestBody.tools,
+              model,
+              apiKey,
+              controller.signal,
+            );
+            const choice = data.choices?.[0];
+            const msg = choice?.message || {};
+            const textContent = msg.content || '';
+
+            // Emit assistant message
+            dispatch({ type: 'AGENT_ADD_MESSAGE', message: { role: 'assistant', content: '', toolCalls: [] } });
+            if (textContent) dispatch({ type: 'AGENT_APPEND_STREAM', text: textContent });
+
+            const toolUses = [];
+            for (const tc of msg.tool_calls || []) {
+              let input = {};
+              try { input = JSON.parse(tc.function?.arguments || '{}'); } catch {}
+              const entry = { id: tc.id, name: tc.function?.name, input, status: 'pending' };
+              toolUses.push(entry);
+              dispatch({ type: 'AGENT_ADD_TOOL_CALL', toolCall: entry });
+            }
+
+            history.push({
+              role: 'assistant',
+              content: textContent,
+              toolCalls: toolUses.map((tu) => ({ id: tu.id, name: tu.name, input: tu.input })),
+            });
+
+            const stopReason = choice?.finish_reason === 'tool_calls' ? 'tool_use' : choice?.finish_reason;
+
+            if (stopReason !== 'tool_use' || toolUses.length === 0) break;
+
+            const toolResults = [];
+            for (const tu of toolUses) {
+              const result = await executeTool(tu, config, projectPath);
+              toolResults.push({ type: 'tool_result', tool_use_id: tu.id, content: String(result) });
+            }
+            dispatch({
+              type: 'AGENT_ADD_MESSAGE',
+              message: { role: 'tool_results', results: toolResults, content: '' },
+            });
+            history.push({ role: 'tool_results', results: toolResults });
+            continue; // loop
+          } catch (fallbackErr) {
+            dispatch({
+              type: 'AGENT_ADD_MESSAGE',
+              message: {
+                role: 'assistant',
+                content: `❌ DeepSeek network error: ${fallbackErr.message}\n\n**Diagnostics**:\n- Endpoint: ${DEEPSEEK_ENDPOINT}\n- Vérifie que ta clé API commence par \`sk-\`\n- Vérifie ta connexion internet\n- La clé peut avoir expiré ou ne plus avoir de crédits`,
+              },
+            });
+            break;
+          }
+        }
+
+        if (streamError) {
+          dispatch({
+            type: 'AGENT_ADD_MESSAGE',
+            message: {
+              role: 'assistant',
+              content: `❌ Network error: ${streamError.message}\n\nVérifie ta clé API, ta connexion, ou les permissions HTTP de Tauri.`,
+            },
+          });
+          break;
         }
 
         if (!response.ok) {
@@ -515,13 +711,17 @@ export function useAgent(state, dispatch) {
           break;
         }
 
-        const { textContent, toolUses, stopReason } = await parseStreamFn(response);
+        const { textContent, toolUses, stopReason, usage } = await parseStreamFn(response);
 
         history.push({
           role: 'assistant',
           content: textContent,
           toolCalls: toolUses.map((tu) => ({ id: tu.id, name: tu.name, input: tu.input || {} })),
         });
+
+        if (usage) {
+          dispatch({ type: 'AGENT_UPDATE_USAGE', usage });
+        }
 
         if (stopReason !== 'tool_use' || toolUses.length === 0) break;
 
@@ -540,12 +740,9 @@ export function useAgent(state, dispatch) {
       }
     } catch (e) {
       if (e.name !== 'AbortError') {
-        const hint = e.message === 'Failed to fetch'
-          ? ' (vérifie ta connexion, la clé API, ou que l\'URL n\'est pas bloquée par CORS)'
-          : '';
         dispatch({
           type: 'AGENT_ADD_MESSAGE',
-          message: { role: 'assistant', content: `❌ Erreur: ${e.message}${hint}` },
+          message: { role: 'assistant', content: `❌ Erreur: ${e.message}` },
         });
       }
     } finally {
@@ -553,5 +750,23 @@ export function useAgent(state, dispatch) {
     }
   }, [state.aiApiKey, state.aiDeepseekKey, state.aiProvider, state.agentConfig, state.agentMessages, state.projectPath, dispatch]);
 
-  return { sendMessage, approveToolCall, rejectToolCall, stop };
+  const sendMessage = runAgentLoop;
+
+  const retryLastMessage = useCallback(async () => {
+    const last = lastUserMessageRef.current;
+    if (!last) return;
+    // Remove the last assistant turn(s) after the last user message from state so the retry replaces them
+    const msgs = [...state.agentMessages];
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i].role === 'user') {
+        // Keep up to (but not including) this user message
+        const trimmed = msgs.slice(0, i);
+        dispatch({ type: 'AGENT_SET_MESSAGES', messages: trimmed });
+        break;
+      }
+    }
+    await runAgentLoop(last.userMessage, last.activeFile);
+  }, [state.agentMessages, dispatch, runAgentLoop]);
+
+  return { sendMessage, approveToolCall, rejectToolCall, stop, retryLastMessage };
 }

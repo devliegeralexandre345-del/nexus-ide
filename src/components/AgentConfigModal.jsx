@@ -12,6 +12,18 @@ const DEFAULT_PERMISSIONS = {
   canWeb: true,
 };
 
+const MODELS = {
+  anthropic: [
+    { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4 (recommandé)' },
+    { value: 'claude-opus-4-20250514', label: 'Claude Opus 4 (plus intelligent)' },
+    { value: 'claude-3-5-haiku-20241022', label: 'Claude Haiku 3.5 (plus rapide)' },
+  ],
+  deepseek: [
+    { value: 'deepseek-chat', label: 'DeepSeek Chat (V3)' },
+    { value: 'deepseek-reasoner', label: 'DeepSeek Reasoner (R1 - chain-of-thought)' },
+  ],
+};
+
 const PERM_LABELS = {
   canRead: 'Lire les fichiers',
   canWrite: 'Modifier les fichiers',
@@ -29,15 +41,17 @@ const CONTEXT_OPTIONS = [
   { value: 'tree_keys', label: 'Arbre + fichiers clés (package.json, README…)', warning: '⚠⚠ Consomme beaucoup plus de tokens' },
 ];
 
-export default function AgentConfigModal({ onStart, onCancel }) {
+export default function AgentConfigModal({ onStart, onCancel, provider = 'anthropic' }) {
   const [context, setContext] = useState('none');
   const [permissions, setPermissions] = useState(DEFAULT_PERMISSIONS);
   const [autoApprove, setAutoApprove] = useState(false);
+  const modelsForProvider = MODELS[provider] || MODELS.anthropic;
+  const [model, setModel] = useState(modelsForProvider[0].value);
 
   const togglePerm = (key) => setPermissions((p) => ({ ...p, [key]: !p[key] }));
 
   const handleStart = () => {
-    onStart({ context, permissions, autoApprove });
+    onStart({ context, permissions, autoApprove, model });
   };
 
   return (
@@ -55,6 +69,24 @@ export default function AgentConfigModal({ onStart, onCancel }) {
         </div>
 
         <div className="px-4 py-3 space-y-4">
+          {/* Modèle */}
+          <div>
+            <div className="text-[10px] uppercase tracking-widest text-lorica-textDim font-semibold mb-2">
+              Modèle ({provider})
+            </div>
+            <select
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+              className="w-full bg-lorica-bg border border-lorica-border rounded-md px-2 py-1.5 text-xs text-lorica-text focus:outline-none focus:border-lorica-accent"
+            >
+              {modelsForProvider.map((m) => (
+                <option key={m.value} value={m.value}>
+                  {m.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
           {/* Contexte initial */}
           <div>
             <div className="text-[10px] uppercase tracking-widest text-lorica-textDim font-semibold mb-2">

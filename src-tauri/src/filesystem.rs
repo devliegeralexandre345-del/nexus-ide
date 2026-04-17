@@ -197,6 +197,27 @@ pub fn cmd_write_file(file_path: String, content: String) -> CmdResult<bool> {
     }
 }
 
+/// Read a file as raw bytes (Vec<u8> — serialized as an array of numbers to JS).
+/// Used by binary previewers (PDF, DOCX, etc.). Capped at 50 MB for safety.
+#[tauri::command]
+pub fn cmd_read_file_bytes(file_path: String) -> CmdResult<Vec<u8>> {
+    let path = Path::new(&file_path);
+    if !path.exists() {
+        return CmdResult::err(format!("File not found: {}", file_path));
+    }
+    let metadata = match fs::metadata(&path) {
+        Ok(m) => m,
+        Err(e) => return CmdResult::err(format!("Cannot read metadata: {}", e)),
+    };
+    if metadata.len() > 50 * 1024 * 1024 {
+        return CmdResult::err("File too large (>50MB)".to_string());
+    }
+    match fs::read(&path) {
+        Ok(bytes) => CmdResult::ok(bytes),
+        Err(e) => CmdResult::err(format!("Cannot read file: {}", e)),
+    }
+}
+
 #[tauri::command]
 pub fn cmd_create_file(file_path: String) -> CmdResult<bool> {
     let path = Path::new(&file_path);

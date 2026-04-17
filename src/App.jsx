@@ -30,6 +30,7 @@ import GitPanel from './components/GitPanel';
 import FilePalette from './components/FilePalette';
 import LoricaDock from './components/LoricaDock';
 import ImagePreview, { isImageFile } from './components/ImagePreview';
+import FilePreview, { hasPreview } from './components/FilePreview';
 import ExtensionManager from './components/ExtensionManager';
 import DebugPanel from './components/DebugPanel';
 import ProblemsPanel from './components/ProblemsPanel';
@@ -271,6 +272,11 @@ export default function App() {
                 <div style={{ width: splitFile ? `${splitRatio * 100}%` : '100%' }} className="h-full overflow-hidden">
                   {isImageFile(activeFile.extension) ? (
                     <ImagePreview file={activeFile} />
+                  ) : hasPreview(activeFile.extension) ? (
+                    <FilePreview
+                      file={activeFile}
+                      editorProps={{ index: state.activeFileIndex, dispatch, theme: state.theme, showMinimap: state.showMinimap !== false }}
+                    />
                   ) : (
                     <Editor file={activeFile} index={state.activeFileIndex} dispatch={dispatch} theme={state.theme} showMinimap={state.showMinimap !== false} />
                   )}
@@ -281,6 +287,11 @@ export default function App() {
                     <div style={{ width: `${(1 - splitRatio) * 100}%` }} className="h-full overflow-hidden">
                       {isImageFile(splitFile.extension) ? (
                         <ImagePreview file={splitFile} />
+                      ) : hasPreview(splitFile.extension) ? (
+                        <FilePreview
+                          file={splitFile}
+                          editorProps={{ index: state.splitFileIndex, dispatch, theme: state.theme, showMinimap: false }}
+                        />
                       ) : (
                         <Editor file={splitFile} index={state.splitFileIndex} dispatch={dispatch} theme={state.theme} showMinimap={false} />
                       )}

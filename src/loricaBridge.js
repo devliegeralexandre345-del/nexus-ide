@@ -45,6 +45,7 @@ const windowControls = {
 const fs = {
   readDir: (dirPath) => safeInvoke('cmd_read_dir', { dirPath }),
   readFile: (filePath) => safeInvoke('cmd_read_file', { filePath }),
+  readFileBytes: (filePath) => safeInvoke('cmd_read_file_bytes', { filePath }),
   writeFile: (filePath, content) => safeInvoke('cmd_write_file', { filePath, content }),
   createFile: (filePath) => safeInvoke('cmd_create_file', { filePath }),
   createDir: (dirPath) => safeInvoke('cmd_create_dir', { dirPath }),

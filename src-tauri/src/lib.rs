@@ -38,6 +38,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             // File system
             filesystem::cmd_read_dir,
             filesystem::cmd_read_file,
+            filesystem::cmd_read_file_bytes,
             filesystem::cmd_write_file,
             filesystem::cmd_create_file,
             filesystem::cmd_create_dir,

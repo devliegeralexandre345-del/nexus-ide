@@ -11,6 +11,7 @@ pub mod updater;
 pub mod spotify_auth;
 pub mod dap;
 pub mod lsp;
+pub mod semantic;
 
 use state::AppState;
 use tauri::Manager;
@@ -113,6 +114,11 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             lsp::cmd_lsp_request,
             lsp::cmd_lsp_notify,
             lsp::cmd_lsp_diagnostics,
+            // Semantic search (local embeddings)
+            semantic::cmd_semantic_index_project,
+            semantic::cmd_semantic_index_status,
+            semantic::cmd_semantic_search,
+            semantic::cmd_semantic_index_clear,
             // Updater
             updater::check_for_update,
             updater::download_and_install_update,

@@ -169,6 +169,17 @@ const search = {
     safeInvoke('cmd_search_replace_in_files', { projectPath, query, replacement, caseSensitive }),
   listProjectFiles: (projectPath) =>
     safeInvoke('cmd_list_project_files', { projectPath }),
+
+  // Semantic search — embeddings-based. First build is slow (downloads the
+  // ONNX model + embeds the repo), queries after that are ~10–50 ms.
+  semanticIndex: (projectPath) =>
+    safeInvoke('cmd_semantic_index_project', { projectPath }),
+  semanticIndexStatus: (projectPath) =>
+    safeInvoke('cmd_semantic_index_status', { projectPath }),
+  semanticSearch: (projectPath, query, topK) =>
+    safeInvoke('cmd_semantic_search', { projectPath, query, topK }),
+  semanticIndexClear: (projectPath) =>
+    safeInvoke('cmd_semantic_index_clear', { projectPath }),
 };
 
 // ============================================

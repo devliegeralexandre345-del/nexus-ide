@@ -7,6 +7,7 @@ import { useSecurity } from './hooks/useSecurity';
 import { useSpotify } from './hooks/useSpotify';
 import { useUpdate } from './hooks/useUpdate';
 import { useShortcuts } from './hooks/useShortcuts';
+import { useSemanticAutoReindex } from './hooks/useSemanticAutoReindex';
 import MenuBar from './components/MenuBar';
 import FileTree from './components/FileTree';
 import TabBar from './components/TabBar';
@@ -51,6 +52,9 @@ export default function App() {
   const security = useSecurity(state, dispatch);
   const spotify = useSpotify();
   const update = useUpdate(dispatch);
+  // Auto-reindex the semantic search index on file changes. No-op until
+  // the user manually builds an index for the project at least once.
+  const semanticAuto = useSemanticAutoReindex(state.projectPath, true);
   const [sidebarWidth, setSidebarWidth] = React.useState(260);
   const [aiPanelWidth, setAiPanelWidth] = React.useState(340);
   const [terminalHeight, setTerminalHeight] = React.useState(200);

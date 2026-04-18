@@ -2,6 +2,8 @@ use notify::{Config, Event, RecommendedWatcher, RecursiveMode, Watcher};
 use std::path::PathBuf;
 use tauri::Emitter;
 
+use crate::state::AppState;
+
 /// Holds file watcher state
 pub struct FileWatcherState {
     watcher: Option<RecommendedWatcher>,
@@ -62,4 +64,41 @@ impl FileWatcherState {
         self.watcher = None;
         self.watched_path = None;
     }
+
+    pub fn watched(&self) -> Option<&PathBuf> {
+        self.watched_path.as_ref()
+    }
+}
+
+/// Start watching the given project directory; emits `fs:change` events to
+/// the frontend on any filesystem activity.
+///
+/// Idempotent: if already watching `path`, does nothing. Calling with a
+/// different path replaces the previous watch.
+#[tauri::command]
+pub fn cmd_watch_project(
+    window: tauri::Window,
+    state: tauri::State<'_, AppState>,
+    path: String,
+) -> Result<(), String> {
+    let mut w = state
+        .watcher
+        .lock()
+        .map_err(|e| format!("Watcher lock poisoned: {}", e))?;
+    if let Some(current) = w.watched() {
+        if current == &PathBuf::from(&path) {
+            return Ok(());
+        }
+    }
+    w.watch(&path, &window)
+}
+
+#[tauri::command]
+pub fn cmd_unwatch_project(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut w = state
+        .watcher
+        .lock()
+        .map_err(|e| format!("Watcher lock poisoned: {}", e))?;
+    w.unwatch();
+    Ok(())
 }

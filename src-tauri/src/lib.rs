@@ -119,6 +119,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
             semantic::cmd_semantic_index_status,
             semantic::cmd_semantic_search,
             semantic::cmd_semantic_index_clear,
+            // File watcher
+            watcher::cmd_watch_project,
+            watcher::cmd_unwatch_project,
             // Updater
             updater::check_for_update,
             updater::download_and_install_update,

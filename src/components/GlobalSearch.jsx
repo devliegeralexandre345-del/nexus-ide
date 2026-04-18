@@ -154,6 +154,9 @@ export default function GlobalSearch({ state, dispatch, onFileOpen }) {
           toast: { type: 'success', message: msg, duration: 4000 },
         });
         await refreshIndexStatus();
+        // Tell other subsystems (useSemanticAutoReindex) that the index now
+        // exists / changed so they can re-probe.
+        window.dispatchEvent(new CustomEvent('lorica:semantic-index-changed'));
       } else {
         dispatch({
           type: 'ADD_TOAST',
@@ -176,6 +179,7 @@ export default function GlobalSearch({ state, dispatch, onFileOpen }) {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'info', message: 'Semantic index cleared.' } });
       setSemanticHits(null);
       await refreshIndexStatus();
+      window.dispatchEvent(new CustomEvent('lorica:semantic-index-changed'));
     }
   }, [state.projectPath, dispatch, refreshIndexStatus]);
 

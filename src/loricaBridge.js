@@ -53,6 +53,10 @@ const fs = {
   rename: (oldPath, newPath) => safeInvoke('cmd_rename', { oldPath, newPath }),
   stat: (filePath) => safeInvoke('cmd_stat', { filePath }),
   exists: (filePath) => safeInvoke('cmd_exists', { filePath }),
+  // Start/stop the project file watcher. Emits `fs:change` events via
+  // @tauri-apps/api/event. Idempotent on the same path.
+  watchProject: (path) => safeInvoke('cmd_watch_project', { path }),
+  unwatchProject: () => safeInvoke('cmd_unwatch_project'),
 };
 
 // ============================================

@@ -518,7 +518,9 @@ You have direct access to the user's codebase via tools. Be concise, precise, an
 - Project path: ${projectPath || 'unknown'}.${activeFileInfo}
 - When making code changes, PREFER write_file over re-creating files. Always read_file first.
 - When running commands, prefer non-interactive flags. Never run commands that keep running indefinitely (use background=false style).
-- Format your answers with concise Markdown. Code blocks should include a language identifier.`;
+- Format your answers with concise Markdown. Code blocks should include a language identifier.
+- When you show code meant to replace a specific file, put a comment on the FIRST line of the code block with the relative path (e.g. \`// src/components/Foo.jsx\` for JS/TS/Rust/C, \`# app/main.py\` for Python/shell). This lets the IDE attach a one-click "Apply" button to the block.
+- If the user @-mentions files/folders ("@file:...", "@folder:...", "@active"), the referenced content is already appended to their message — don't call read_file for those paths unless you need more than what's provided.`;
 
     // Build message history in a neutral form
     const history = [];

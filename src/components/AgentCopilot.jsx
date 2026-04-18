@@ -1,5 +1,5 @@
 // src/components/AgentCopilot.jsx
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   Bot, Send, Square, Plus, Trash2, Loader2, RefreshCw, Activity,
   AtSign, FileText, Folder, Star,
@@ -7,6 +7,7 @@ import {
 import AgentConfigModal from './AgentConfigModal';
 import AgentToolBlock from './AgentToolBlock';
 import MarkdownMessage from './MarkdownMessage';
+import ApplyCodeModal from './ApplyCodeModal';
 import {
   parseMentions,
   expandMentions,
@@ -36,6 +37,8 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
   const [mentionIdx, setMentionIdx] = useState(0);
   const [mentionQuery, setMentionQuery] = useState('');
   const [mentionStart, setMentionStart] = useState(-1); // caret position of the '@'
+  // Apply-code modal state — set when the user clicks "Apply" on a code block
+  const [applyModal, setApplyModal] = useState(null); // { code, hint } | null
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const inputRef = useRef(null);
@@ -177,6 +180,37 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
     }, 0);
   };
 
+  // --- Apply-code handlers ---
+  // Opens the ApplyCodeModal. `hint` is the auto-detected target path (may be
+  // null — in that case the user picks manually in the modal). onApply is
+  // stable so MarkdownMessage stays correctly memoized.
+  const handleApplyCode = useCallback((code, hint) => {
+    setApplyModal({ code, hint: hint || (activeFile?.path ?? null) });
+  }, [activeFile]);
+
+  const handleConfirmApply = useCallback(async ({ path, newContent }) => {
+    try {
+      const r = await window.lorica.fs.writeFile(path, newContent);
+      if (r && r.success) {
+        // Open (or refresh) the file in the editor so the user immediately
+        // sees the applied change.
+        const name = path.split(/[\\/]/).pop();
+        const ext = name.includes('.') ? name.split('.').pop() : '';
+        dispatch({
+          type: 'OPEN_FILE',
+          file: { path, name, content: newContent, extension: ext, dirty: false },
+        });
+        setApplyModal(null);
+      } else {
+        // eslint-disable-next-line no-alert
+        alert(`Apply failed: ${r?.error || 'unknown error'}`);
+      }
+    } catch (e) {
+      // eslint-disable-next-line no-alert
+      alert(`Apply error: ${e.message}`);
+    }
+  }, [dispatch]);
+
   const handleStart = (config) => {
     dispatch({ type: 'AGENT_SET_CONFIG', config });
     setShowConfig(false);
@@ -252,6 +286,17 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
           onStart={handleStart}
           onCancel={() => setShowConfig(false)}
           provider={state.aiProvider || 'anthropic'}
+        />
+      )}
+
+      {/* Apply-code modal */}
+      {applyModal && (
+        <ApplyCodeModal
+          code={applyModal.code}
+          initialPath={applyModal.hint || ''}
+          projectPath={state.projectPath}
+          onConfirm={handleConfirmApply}
+          onCancel={() => setApplyModal(null)}
         />
       )}
 
@@ -351,7 +396,12 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
               ) : (
                 <div className="rounded-lg px-3 py-2 bg-lorica-panel border border-lorica-border">
                   {msg.content && (
-                    <MarkdownMessage content={msg.content} isStreaming={isStreaming && (msg.toolCalls?.length === 0)} />
+                    <MarkdownMessage
+                      content={msg.content}
+                      isStreaming={isStreaming && (msg.toolCalls?.length === 0)}
+                      onApply={handleApplyCode}
+                      projectPath={state.projectPath}
+                    />
                   )}
                   {/* Tool calls */}
                   {(msg.toolCalls || []).map((tc) => (

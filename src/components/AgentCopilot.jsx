@@ -1,9 +1,19 @@
 // src/components/AgentCopilot.jsx
-import React, { useState, useRef, useEffect } from 'react';
-import { Bot, Send, Square, Plus, Trash2, Loader2, RefreshCw, Activity } from 'lucide-react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
+import {
+  Bot, Send, Square, Plus, Trash2, Loader2, RefreshCw, Activity,
+  AtSign, FileText, Folder, Star,
+} from 'lucide-react';
 import AgentConfigModal from './AgentConfigModal';
 import AgentToolBlock from './AgentToolBlock';
 import MarkdownMessage from './MarkdownMessage';
+import {
+  parseMentions,
+  expandMentions,
+  flattenFileTree,
+  fuzzyMatch,
+  escapePath,
+} from '../utils/mentions';
 
 // Slash commands for quick context injection
 const SLASH_COMMANDS = [
@@ -21,9 +31,47 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
   const [showConfig, setShowConfig] = useState(false);
   const [slashOpen, setSlashOpen] = useState(false);
   const [slashIdx, setSlashIdx] = useState(0);
+  // @mention picker state
+  const [mentionOpen, setMentionOpen] = useState(false);
+  const [mentionIdx, setMentionIdx] = useState(0);
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionStart, setMentionStart] = useState(-1); // caret position of the '@'
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Flatten the project file tree once per update — used by the mention picker
+  // for fuzzy path search. Folders and files both land in the same list so a
+  // single query can match either.
+  const flatFiles = useMemo(
+    () => flattenFileTree(state.fileTree || [], state.projectPath || ''),
+    [state.fileTree, state.projectPath],
+  );
+
+  // Compose the candidate list the mention picker shows. The "active file"
+  // shortcut is always first (so `@<Enter>` attaches the current buffer), then
+  // fuzzy-matched files and folders from the project.
+  const mentionItems = useMemo(() => {
+    if (!mentionOpen) return [];
+    const items = [];
+    if (activeFile) {
+      items.push({
+        kind: 'active',
+        name: 'Active file',
+        detail: activeFile.path || activeFile.name || '(no path)',
+      });
+    }
+    const matched = fuzzyMatch(flatFiles, mentionQuery, 25);
+    for (const m of matched) {
+      items.push({
+        kind: m.isDirectory ? 'folder' : 'file',
+        name: m.name,
+        detail: m.relPath,
+        path: m.path,
+      });
+    }
+    return items;
+  }, [mentionOpen, mentionQuery, flatFiles, activeFile]);
 
   // Auto-scroll to bottom, but only when the user is already near the bottom
   // (so manual scroll-up isn't fought) and WITHOUT smooth behaviour (which
@@ -72,20 +120,110 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
+  // --- @mention detection ---
+  // Re-evaluate on every input change. We look at the substring from the
+  // caret back to the previous whitespace; if it starts with '@' and contains
+  // no nested '@' or colon boundary problems, we consider the user to be
+  // typing a mention query and surface the picker.
+  const detectMention = () => {
+    const el = inputRef.current;
+    if (!el) return;
+    // Don't clash with the slash-command picker
+    if (slashOpen) { setMentionOpen(false); return; }
+    const caret = el.selectionStart ?? input.length;
+    const before = input.slice(0, caret);
+    // Match the last @token up to caret. We stop at whitespace so a fresh
+    // "@" at the start of a new word reopens cleanly.
+    const m = /(?:^|\s)@([a-zA-Z0-9_./\\:-]*)$/.exec(before);
+    if (m) {
+      const atPos = caret - m[1].length - 1; // position of the '@' char
+      setMentionStart(atPos);
+      setMentionQuery(m[1]);
+      setMentionOpen(true);
+      setMentionIdx(0);
+    } else {
+      setMentionOpen(false);
+      setMentionStart(-1);
+    }
+  };
+
+  useEffect(() => {
+    detectMention();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [input, slashOpen]);
+
+  const applyMention = (item) => {
+    if (!item || mentionStart < 0) return;
+    // Replace the '@query' token with the rendered token.
+    const caret = inputRef.current?.selectionStart ?? input.length;
+    const head = input.slice(0, mentionStart);
+    const tail = input.slice(caret);
+    let token = '';
+    if (item.kind === 'active') token = '@active';
+    else if (item.kind === 'file') token = `@file:${escapePath(item.path)}`;
+    else if (item.kind === 'folder') token = `@folder:${escapePath(item.path)}`;
+    const next = `${head}${token} ${tail}`;
+    setInput(next);
+    setMentionOpen(false);
+    setMentionStart(-1);
+    // Put the caret right after the inserted token (and trailing space)
+    setTimeout(() => {
+      const pos = head.length + token.length + 1;
+      const el = inputRef.current;
+      if (el) {
+        el.focus();
+        try { el.setSelectionRange(pos, pos); } catch (_) {}
+      }
+    }, 0);
+  };
+
   const handleStart = (config) => {
     dispatch({ type: 'AGENT_SET_CONFIG', config });
     setShowConfig(false);
     setTimeout(() => inputRef.current?.focus(), 100);
   };
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!input.trim() || state.agentLoading) return;
-    agent.sendMessage(input.trim(), activeFile);
+    const raw = input.trim();
+    // Parse @mentions and expand them into a preamble. The raw message is
+    // kept so the model sees the tokens inline (useful for "compare @file:a
+    // and @file:b" style prompts) and the preamble provides the content.
+    let payload = raw;
+    try {
+      const tokens = parseMentions(raw);
+      if (tokens.length > 0) {
+        const preamble = await expandMentions(tokens, {
+          activeFile,
+          projectPath: state.projectPath,
+        });
+        if (preamble) payload = preamble + raw;
+      }
+    } catch (e) {
+      // Expansion failure shouldn't block the send — log and carry on.
+      // eslint-disable-next-line no-console
+      console.warn('[agent] mention expansion failed:', e);
+    }
+    agent.sendMessage(payload, activeFile);
     setInput('');
     setSlashOpen(false);
+    setMentionOpen(false);
   };
 
   const handleKeyDown = (e) => {
+    // @mention picker navigation takes priority (it's the most recently
+    // triggered dropdown — and by construction it cannot be open while the
+    // slash picker is also open).
+    if (mentionOpen && mentionItems.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx((i) => (i + 1) % mentionItems.length); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); setMentionIdx((i) => (i - 1 + mentionItems.length) % mentionItems.length); return; }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        applyMention(mentionItems[mentionIdx]);
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); setMentionOpen(false); return; }
+    }
     if (slashOpen && slashMatches.length > 0) {
       if (e.key === 'ArrowDown') { e.preventDefault(); setSlashIdx((i) => (i + 1) % slashMatches.length); return; }
       if (e.key === 'ArrowUp') { e.preventDefault(); setSlashIdx((i) => (i - 1 + slashMatches.length) % slashMatches.length); return; }
@@ -261,13 +399,43 @@ export default function AgentCopilot({ state, dispatch, agent, activeFile }) {
             </div>
           )}
 
+          {/* @mention picker — file / folder / active */}
+          {mentionOpen && mentionItems.length > 0 && (
+            <div className="absolute left-2 right-2 bottom-full mb-1 bg-lorica-panel border border-lorica-border rounded-lg shadow-lg overflow-hidden z-10 max-h-64 overflow-y-auto">
+              <div className="px-2.5 py-1 text-[9px] uppercase tracking-widest text-lorica-textDim/70 border-b border-lorica-border bg-lorica-bg/40 sticky top-0">
+                <span className="flex items-center gap-1"><AtSign size={9} /> Mention — ↑↓ pour choisir, Tab/↵ pour insérer</span>
+              </div>
+              {mentionItems.map((item, i) => {
+                const Icon =
+                  item.kind === 'active' ? Star :
+                  item.kind === 'folder' ? Folder : FileText;
+                return (
+                  <button
+                    key={`${item.kind}:${item.detail}:${i}`}
+                    onMouseEnter={() => setMentionIdx(i)}
+                    onMouseDown={(e) => { e.preventDefault(); applyMention(item); }}
+                    className={`w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs transition-colors ${
+                      i === mentionIdx ? 'bg-lorica-accent/20 text-lorica-accent' : 'text-lorica-text hover:bg-lorica-border/30'
+                    }`}
+                  >
+                    <Icon size={11} className={item.kind === 'active' ? 'text-yellow-400' : item.kind === 'folder' ? 'text-lorica-accent/80' : 'text-lorica-textDim'} />
+                    <span className="font-semibold truncate">{item.name}</span>
+                    <span className="text-[10px] text-lorica-textDim truncate ml-auto">{item.detail}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           <div className="flex items-center gap-2 bg-lorica-bg rounded-lg border border-lorica-border px-3 py-1.5 focus-within:border-lorica-accent/50 transition-colors">
             <input
               ref={inputRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Message à l'agent… ( / pour commandes )"
+              onKeyUp={detectMention}
+              onClick={detectMention}
+              placeholder="Message à l'agent… ( / commandes, @ mentions )"
               className="flex-1 bg-transparent text-xs text-lorica-text outline-none placeholder:text-lorica-textDim/50"
               disabled={state.agentLoading}
             />

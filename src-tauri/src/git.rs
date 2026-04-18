@@ -265,6 +265,18 @@ pub fn cmd_git_discard(project_path: String, file_path: String) -> CmdResult<boo
         .unwrap_or_else(|e| CmdResult::err(e))
 }
 
+// Returns the full unified diff of the *staged* changes. Used by the AI
+// commit-message generator — the model reads this to produce a concise
+// subject line. Separate from `cmd_git_diff` because that one reports the
+// unstaged working tree.
+#[tauri::command]
+pub fn cmd_git_diff_staged(project_path: String) -> CmdResult<String> {
+    match run_git(&project_path, &["diff", "--cached", "--no-color"]) {
+        Ok(output) => CmdResult::ok(output),
+        Err(e) => CmdResult::err(e),
+    }
+}
+
 // ======================================================
 // Consolidated summary — runs status, log, branches in parallel.
 // Cuts a typical panel refresh from ~6-10 sequential subprocess

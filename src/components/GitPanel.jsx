@@ -15,7 +15,9 @@ import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
   GitBranch, GitCommit, Plus, Minus, Check, X, RefreshCw,
   Upload, Download, RotateCcw, ChevronDown, ChevronRight,
+  Sparkles, Loader2,
 } from 'lucide-react';
+import { generateCommitMessage } from '../utils/aiCommitMessage';
 
 const REFRESH_DEBOUNCE_MS = 120;
 
@@ -85,6 +87,8 @@ export default function GitPanel({ state, dispatch }) {
   const [showBranches, setShowBranches] = useState(false);
   const [refreshing, setRefreshing] = useState(false); // background indicator only
   const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const [generatingMsg, setGeneratingMsg] = useState(false);
+  const generateAbortRef = useRef(null);
 
   // Refs for debouncing + single-flight + stale-close protection
   const debounceTimerRef = useRef(null);
@@ -233,6 +237,72 @@ export default function GitPanel({ state, dispatch }) {
     }
   }, [commitMsg, state.projectPath, scheduleRefresh, dispatch]);
 
+  // --------------------------------------------------------------
+  // AI-generated commit message.
+  //   1. Grab the staged diff in a single IPC call.
+  //   2. Ship it to the fast model (Haiku / deepseek-chat) with a
+  //      Conventional-Commits prompt.
+  //   3. Drop the result straight into the input so the user can
+  //      tweak + Ctrl+Enter to commit.
+  // --------------------------------------------------------------
+  const handleGenerateCommitMessage = useCallback(async () => {
+    if (generatingMsg) {
+      // Second click cancels an in-flight request.
+      generateAbortRef.current?.abort();
+      return;
+    }
+    const provider = state.aiProvider || 'anthropic';
+    const apiKey = provider === 'anthropic' ? state.aiApiKey : state.aiDeepseekKey;
+    if (!apiKey) {
+      dispatch({
+        type: 'ADD_TOAST',
+        toast: {
+          type: 'warning',
+          message: `Configure a ${provider === 'anthropic' ? 'Anthropic' : 'DeepSeek'} API key in Settings first.`,
+        },
+      });
+      return;
+    }
+
+    setGeneratingMsg(true);
+    const ctrl = new AbortController();
+    generateAbortRef.current = ctrl;
+    try {
+      const res = await window.lorica.git.diffStaged(state.projectPath);
+      const diff = typeof res === 'string' ? res : res?.data;
+      if (res && res.success === false) {
+        throw new Error(res.error || 'git diff --cached failed');
+      }
+      if (!diff || !diff.trim()) {
+        dispatch({
+          type: 'ADD_TOAST',
+          toast: { type: 'warning', message: 'Nothing staged — stage changes first.' },
+        });
+        return;
+      }
+      const msg = await generateCommitMessage({
+        diff,
+        provider,
+        apiKey,
+        signal: ctrl.signal,
+      });
+      if (ctrl.signal.aborted) return;
+      if (msg) setCommitMsg(msg);
+    } catch (e) {
+      if (e?.name === 'AbortError') return;
+      dispatch({
+        type: 'ADD_TOAST',
+        toast: { type: 'error', message: `AI commit failed: ${e.message || e}` },
+      });
+    } finally {
+      if (generateAbortRef.current === ctrl) generateAbortRef.current = null;
+      setGeneratingMsg(false);
+    }
+  }, [generatingMsg, state.projectPath, state.aiProvider, state.aiApiKey, state.aiDeepseekKey, dispatch]);
+
+  // Cancel any in-flight generation when the panel unmounts.
+  useEffect(() => () => generateAbortRef.current?.abort(), []);
+
   const handlePush = useCallback(async () => {
     dispatch({ type: 'ADD_TOAST', toast: { type: 'info', message: 'Pushing…', duration: 5000 } });
     const res = await window.lorica.git.push(state.projectPath);
@@ -335,7 +405,21 @@ export default function GitPanel({ state, dispatch }) {
               onKeyDown={(e) => e.key === 'Enter' && e.ctrlKey && handleCommit()}
               placeholder="Commit message (Ctrl+Enter)"
               className="flex-1 bg-lorica-bg border border-lorica-border rounded px-2 py-1.5 text-xs text-lorica-text outline-none focus:border-lorica-accent placeholder:text-lorica-textDim/50"
+              disabled={generatingMsg}
             />
+            <button
+              onClick={handleGenerateCommitMessage}
+              className={`p-1.5 rounded transition-colors ${
+                generatingMsg
+                  ? 'bg-purple-500/30 text-purple-300'
+                  : 'bg-purple-500/10 text-purple-400 hover:bg-purple-500/20'
+              }`}
+              title={generatingMsg ? 'Generating… (click to cancel)' : 'Generate commit message with AI'}
+            >
+              {generatingMsg
+                ? <Loader2 size={14} className="animate-spin" />
+                : <Sparkles size={14} />}
+            </button>
             <button
               onClick={handleCommit}
               className="p-1.5 bg-lorica-accent/20 text-lorica-accent rounded hover:bg-lorica-accent/30"

@@ -125,6 +125,7 @@ export async function fetchInlineCompletion({
   prefix, suffix, language, filePath, provider, apiKey, model, signal,
 }) {
   if (!apiKey) return '';
+  if (signal?.aborted) return '';
   const chosenModel = model || FAST_MODELS[provider] || FAST_MODELS.anthropic;
 
   const clippedPrefix = prefix.length > PREFIX_MAX ? prefix.slice(-PREFIX_MAX) : prefix;
@@ -194,8 +195,15 @@ export async function fetchInlineCompletion({
     const raw = data?.choices?.[0]?.message?.content || '';
     return cleanCompletion(raw, { prefix: clippedPrefix, suffix: clippedSuffix });
   } catch (e) {
-    if (e?.name === 'AbortError') return '';
-    console.warn('[inline-ai] request failed:', e.message);
+    // Benign: AbortError fires when the user types during an inflight call.
+    // Benign: "resource id N is invalid" fires when tauri-plugin-http tears
+    // down the response after the same abort — we already have the abort
+    // info, nothing to salvage. Everything else is logged.
+    const msg = e?.message || '';
+    if (e?.name === 'AbortError' || /resource id \d+ is invalid/i.test(msg)) {
+      return '';
+    }
+    console.warn('[inline-ai] request failed:', msg);
     return '';
   }
 }

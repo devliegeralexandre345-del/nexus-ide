@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::process::Command;
+use std::thread;
 
 use crate::filesystem::CmdResult;
 
@@ -262,4 +263,70 @@ pub fn cmd_git_discard(project_path: String, file_path: String) -> CmdResult<boo
     run_git(&project_path, &["checkout", "--", &file_path])
         .map(|_| CmdResult::ok(true))
         .unwrap_or_else(|e| CmdResult::err(e))
+}
+
+// ======================================================
+// Consolidated summary — runs status, log, branches in parallel.
+// Cuts a typical panel refresh from ~6-10 sequential subprocess
+// spawns down to 3 concurrent ones with a single IPC round-trip.
+// ======================================================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GitSummary {
+    pub status: GitStatus,
+    pub log: Vec<GitLogEntry>,
+    pub branches: Vec<GitBranch>,
+}
+
+#[tauri::command]
+pub fn cmd_git_summary(
+    project_path: String,
+    log_count: Option<usize>,
+    include_log: Option<bool>,
+    include_branches: Option<bool>,
+) -> CmdResult<GitSummary> {
+    let want_log = include_log.unwrap_or(true);
+    let want_branches = include_branches.unwrap_or(true);
+    let count = log_count.unwrap_or(20);
+
+    // Spawn threads so the three (potentially slow) subprocess calls
+    // overlap instead of serializing.
+    let pp_status = project_path.clone();
+    let t_status = thread::spawn(move || cmd_git_status(pp_status));
+
+    let t_log = if want_log {
+        let pp = project_path.clone();
+        Some(thread::spawn(move || cmd_git_log(pp, Some(count))))
+    } else {
+        None
+    };
+
+    let t_branches = if want_branches {
+        let pp = project_path.clone();
+        Some(thread::spawn(move || cmd_git_branches(pp)))
+    } else {
+        None
+    };
+
+    let status_res = t_status.join().unwrap_or_else(|_| CmdResult::<GitStatus>::err("status thread panicked"));
+    let status = match status_res.data {
+        Some(s) => s,
+        None => {
+            return CmdResult::err(status_res.error.unwrap_or_else(|| "git status failed".into()));
+        }
+    };
+
+    let log = if let Some(h) = t_log {
+        h.join().ok().and_then(|r| r.data).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let branches = if let Some(h) = t_branches {
+        h.join().ok().and_then(|r| r.data).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    CmdResult::ok(GitSummary { status, log, branches })
 }

@@ -187,6 +187,14 @@ const git = {
   branches: (projectPath) => safeInvoke('cmd_git_branches', { projectPath }),
   checkout: (projectPath, branch) => safeInvoke('cmd_git_checkout', { projectPath, branch }),
   discard: (projectPath, filePath) => safeInvoke('cmd_git_discard', { projectPath, filePath }),
+  // Consolidated call — returns { status, log, branches } in a single IPC
+  // round-trip with the 3 git subprocesses running in parallel.
+  summary: (projectPath, opts = {}) => safeInvoke('cmd_git_summary', {
+    projectPath,
+    logCount: opts.logCount ?? 20,
+    includeLog: opts.includeLog ?? true,
+    includeBranches: opts.includeBranches ?? true,
+  }),
 };
 
 // ============================================

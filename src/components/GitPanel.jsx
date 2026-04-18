@@ -1,8 +1,80 @@
-import React, { useState, useEffect, useCallback } from 'react';
+// src/components/GitPanel.jsx
+//
+// Performance-oriented rewrite:
+//   • Single consolidated `git.summary` call (status + log + branches run
+//     concurrently on the Rust side).
+//   • Optimistic UI for stage/unstage/discard — local state updates
+//     immediately, real refresh happens in the background.
+//   • Debounced refresh coalesces rapid successive clicks into one call.
+//   • FileRow memoized with React.memo to avoid re-rendering the whole list
+//     when a single file changes.
+//   • Stale data stays visible during refresh (no empty-state flicker).
+//   • Log + branches are only fetched when their sections are expanded.
+
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
   GitBranch, GitCommit, Plus, Minus, Check, X, RefreshCw,
-  Upload, Download, RotateCcw, ChevronDown, ChevronRight, FileCode, Trash2
+  Upload, Download, RotateCcw, ChevronDown, ChevronRight,
 } from 'lucide-react';
+
+const REFRESH_DEBOUNCE_MS = 120;
+
+const statusColor = (status) => {
+  switch (status) {
+    case 'M': return 'text-amber-400';
+    case 'A':
+    case '?': return 'text-green-400';
+    case 'D': return 'text-red-400';
+    case 'R': return 'text-blue-400';
+    default:  return 'text-lorica-textDim';
+  }
+};
+
+const basename = (p) => (p || '').split(/[/\\]/).pop();
+
+// ------------------------------------------------------------------
+// Memoized file row — key bit of the perf fix. Without React.memo, a
+// single optimistic state update re-renders every row in the list.
+// ------------------------------------------------------------------
+const FileRow = memo(function FileRow({ file, staged, onStage, onUnstage, onDiscard }) {
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-0.5 text-xs hover:bg-lorica-panel/40 group">
+      <span className={`text-[10px] font-mono w-3 ${statusColor(file.status)}`}>{file.status}</span>
+      <span
+        className={`flex-1 truncate ${staged ? 'text-lorica-text' : 'text-lorica-textDim group-hover:text-lorica-text'}`}
+        title={file.path}
+      >
+        {basename(file.path)}
+      </span>
+      {staged ? (
+        <button
+          onClick={() => onUnstage(file.path)}
+          className="opacity-0 group-hover:opacity-100 p-0.5 text-lorica-textDim hover:text-amber-400"
+          title="Unstage"
+        >
+          <Minus size={12} />
+        </button>
+      ) : (
+        <>
+          <button
+            onClick={() => onStage(file.path)}
+            className="opacity-0 group-hover:opacity-100 p-0.5 text-lorica-textDim hover:text-green-400"
+            title="Stage"
+          >
+            <Plus size={12} />
+          </button>
+          <button
+            onClick={() => onDiscard(file.path)}
+            className="opacity-0 group-hover:opacity-100 p-0.5 text-lorica-textDim hover:text-red-400"
+            title="Discard"
+          >
+            <RotateCcw size={12} />
+          </button>
+        </>
+      )}
+    </div>
+  );
+});
 
 export default function GitPanel({ state, dispatch }) {
   const [gitStatus, setGitStatus] = useState(null);
@@ -11,52 +83,142 @@ export default function GitPanel({ state, dispatch }) {
   const [commitMsg, setCommitMsg] = useState('');
   const [showLog, setShowLog] = useState(false);
   const [showBranches, setShowBranches] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false); // background indicator only
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
 
-  const refresh = useCallback(async () => {
+  // Refs for debouncing + single-flight + stale-close protection
+  const debounceTimerRef = useRef(null);
+  const inflightRef = useRef(false);
+  const pendingAnotherRef = useRef(false);
+  const mountedRef = useRef(true);
+  const showLogRef = useRef(showLog);
+  const showBranchesRef = useRef(showBranches);
+
+  useEffect(() => { showLogRef.current = showLog; }, [showLog]);
+  useEffect(() => { showBranchesRef.current = showBranches; }, [showBranches]);
+
+  useEffect(() => () => {
+    mountedRef.current = false;
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+  }, []);
+
+  // ----------------------------------------------------------------
+  // Core refresh — single IPC call, status+log+branches in parallel.
+  // Only fetches log/branches if their accordions are open.
+  // ----------------------------------------------------------------
+  const doRefresh = useCallback(async () => {
     if (!state.projectPath) return;
-    setLoading(true);
-    try {
-      const res = await window.lorica.git.status(state.projectPath);
-      const data = res?.data || res;
-      setGitStatus(data);
+    if (inflightRef.current) {
+      // A refresh is already running — mark that we want another one after.
+      pendingAnotherRef.current = true;
+      return;
+    }
+    inflightRef.current = true;
+    setRefreshing(true);
 
-      if (data?.is_repo) {
-        const logRes = await window.lorica.git.log(state.projectPath, 20);
-        setGitLog(logRes?.data || logRes || []);
-        const brRes = await window.lorica.git.branches(state.projectPath);
-        setBranches(brRes?.data || brRes || []);
+    try {
+      const res = await window.lorica.git.summary(state.projectPath, {
+        logCount: 20,
+        includeLog: showLogRef.current,
+        includeBranches: showBranchesRef.current,
+      });
+      if (!mountedRef.current) return;
+
+      const payload = res?.data || res;
+      if (payload && typeof payload === 'object' && 'status' in payload) {
+        setGitStatus(payload.status);
+        if (showLogRef.current) setGitLog(payload.log || []);
+        if (showBranchesRef.current) setBranches(payload.branches || []);
       }
     } catch (e) {
-      console.error('Git refresh failed:', e);
+      console.error('[GitPanel] refresh failed:', e);
+    } finally {
+      inflightRef.current = false;
+      if (mountedRef.current) {
+        setRefreshing(false);
+        setHasLoadedOnce(true);
+      }
+      // If something requested another refresh while we were running, do it.
+      if (pendingAnotherRef.current) {
+        pendingAnotherRef.current = false;
+        scheduleRefresh();
+      }
     }
-    setLoading(false);
-  }, [state.projectPath]);
+  }, [state.projectPath]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  useEffect(() => { refresh(); }, [refresh]);
+  // Debounced scheduler — collapses bursts of calls into one.
+  const scheduleRefresh = useCallback(() => {
+    if (debounceTimerRef.current) clearTimeout(debounceTimerRef.current);
+    debounceTimerRef.current = setTimeout(() => {
+      debounceTimerRef.current = null;
+      doRefresh();
+    }, REFRESH_DEBOUNCE_MS);
+  }, [doRefresh]);
 
-  const handleStage = async (filePath) => {
+  // Initial load + when project changes.
+  useEffect(() => {
+    setHasLoadedOnce(false);
+    setGitStatus(null);
+    setGitLog([]);
+    setBranches([]);
+    doRefresh();
+  }, [state.projectPath, doRefresh]);
+
+  // Reload log/branches when their sections get toggled open (they may
+  // not have been fetched yet).
+  useEffect(() => {
+    if (showLog && gitStatus?.is_repo && gitLog.length === 0) scheduleRefresh();
+  }, [showLog]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (showBranches && gitStatus?.is_repo && branches.length === 0) scheduleRefresh();
+  }, [showBranches]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ----------------------------------------------------------------
+  // Optimistic mutators — update local state immediately so the UI
+  // feels instant, then kick off a background refresh to reconcile.
+  // ----------------------------------------------------------------
+  const applyOptimistic = useCallback((mutator) => {
+    setGitStatus((prev) => {
+      if (!prev) return prev;
+      const files = mutator(prev.files);
+      return { ...prev, files };
+    });
+  }, []);
+
+  const handleStage = useCallback(async (filePath) => {
+    applyOptimistic((files) =>
+      files.map((f) => (f.path === filePath ? { ...f, staged: true } : f))
+    );
     await window.lorica.git.stage(state.projectPath, filePath);
-    refresh();
-  };
+    scheduleRefresh();
+  }, [state.projectPath, applyOptimistic, scheduleRefresh]);
 
-  const handleUnstage = async (filePath) => {
+  const handleUnstage = useCallback(async (filePath) => {
+    applyOptimistic((files) =>
+      files.map((f) => (f.path === filePath ? { ...f, staged: false } : f))
+    );
     await window.lorica.git.unstage(state.projectPath, filePath);
-    refresh();
-  };
+    scheduleRefresh();
+  }, [state.projectPath, applyOptimistic, scheduleRefresh]);
 
-  const handleStageAll = async () => {
+  const handleStageAll = useCallback(async () => {
+    applyOptimistic((files) => files.map((f) => ({ ...f, staged: true })));
     await window.lorica.git.stageAll(state.projectPath);
-    refresh();
-  };
+    scheduleRefresh();
+  }, [state.projectPath, applyOptimistic, scheduleRefresh]);
 
-  const handleDiscard = async (filePath) => {
+  const handleDiscard = useCallback(async (filePath) => {
+    // Optimistically remove from unstaged list.
+    applyOptimistic((files) => files.filter((f) => !(f.path === filePath && !f.staged)));
     await window.lorica.git.discard(state.projectPath, filePath);
-    refresh();
-    dispatch({ type: 'ADD_TOAST', toast: { type: 'info', message: `Discarded changes: ${filePath.split(/[/\\]/).pop()}` } });
-  };
+    dispatch({
+      type: 'ADD_TOAST',
+      toast: { type: 'info', message: `Discarded: ${basename(filePath)}` },
+    });
+    scheduleRefresh();
+  }, [state.projectPath, applyOptimistic, scheduleRefresh, dispatch]);
 
-  const handleCommit = async () => {
+  const handleCommit = useCallback(async () => {
     if (!commitMsg.trim()) {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'warning', message: 'Enter a commit message' } });
       return;
@@ -65,47 +227,62 @@ export default function GitPanel({ state, dispatch }) {
     if (res?.success !== false) {
       setCommitMsg('');
       dispatch({ type: 'ADD_TOAST', toast: { type: 'success', message: 'Committed!', duration: 2000 } });
-      refresh();
+      scheduleRefresh();
     } else {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'error', message: res?.error || 'Commit failed' } });
     }
-  };
+  }, [commitMsg, state.projectPath, scheduleRefresh, dispatch]);
 
-  const handlePush = async () => {
-    dispatch({ type: 'ADD_TOAST', toast: { type: 'info', message: 'Pushing...', duration: 5000 } });
+  const handlePush = useCallback(async () => {
+    dispatch({ type: 'ADD_TOAST', toast: { type: 'info', message: 'Pushing…', duration: 5000 } });
     const res = await window.lorica.git.push(state.projectPath);
     if (res?.success !== false) {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'success', message: 'Pushed!', duration: 2000 } });
-      refresh();
+      scheduleRefresh();
     } else {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'error', message: res?.error || 'Push failed' } });
     }
-  };
+  }, [state.projectPath, scheduleRefresh, dispatch]);
 
-  const handlePull = async () => {
-    dispatch({ type: 'ADD_TOAST', toast: { type: 'info', message: 'Pulling...', duration: 5000 } });
+  const handlePull = useCallback(async () => {
+    dispatch({ type: 'ADD_TOAST', toast: { type: 'info', message: 'Pulling…', duration: 5000 } });
     const res = await window.lorica.git.pull(state.projectPath);
     if (res?.success !== false) {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'success', message: 'Pulled!', duration: 2000 } });
-      refresh();
+      scheduleRefresh();
     } else {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'error', message: res?.error || 'Pull failed' } });
     }
-  };
+  }, [state.projectPath, scheduleRefresh, dispatch]);
 
-  const handleCheckout = async (branch) => {
+  const handleCheckout = useCallback(async (branch) => {
     const res = await window.lorica.git.checkout(state.projectPath, branch);
     if (res?.success !== false) {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'success', message: `Switched to ${branch}` } });
-      refresh();
+      scheduleRefresh();
     } else {
       dispatch({ type: 'ADD_TOAST', toast: { type: 'error', message: res?.error || 'Checkout failed' } });
     }
-  };
+  }, [state.projectPath, scheduleRefresh, dispatch]);
 
   const close = () => dispatch({ type: 'SET_PANEL', panel: 'showGit', value: false });
 
-  if (!gitStatus?.is_repo) {
+  // --- Early states -------------------------------------------------
+  if (!hasLoadedOnce && !gitStatus) {
+    return (
+      <div className="h-full flex flex-col bg-lorica-surface">
+        <div className="flex items-center justify-between px-3 py-2 border-b border-lorica-border">
+          <span className="text-[10px] uppercase tracking-widest text-lorica-textDim font-semibold">Git</span>
+          <button onClick={close} className="text-lorica-textDim hover:text-lorica-text"><X size={14} /></button>
+        </div>
+        <div className="flex-1 flex items-center justify-center text-xs text-lorica-textDim">
+          <RefreshCw size={14} className="animate-spin mr-2" /> Loading…
+        </div>
+      </div>
+    );
+  }
+
+  if (gitStatus && !gitStatus.is_repo) {
     return (
       <div className="h-full flex flex-col bg-lorica-surface">
         <div className="flex items-center justify-between px-3 py-2 border-b border-lorica-border">
@@ -122,18 +299,9 @@ export default function GitPanel({ state, dispatch }) {
     );
   }
 
-  const staged = gitStatus.files.filter(f => f.staged);
-  const unstaged = gitStatus.files.filter(f => !f.staged);
-
-  const statusColor = (status) => {
-    switch (status) {
-      case 'M': return 'text-amber-400';
-      case 'A': case '?': return 'text-green-400';
-      case 'D': return 'text-red-400';
-      case 'R': return 'text-blue-400';
-      default: return 'text-lorica-textDim';
-    }
-  };
+  const files = gitStatus?.files || [];
+  const staged = files.filter((f) => f.staged);
+  const unstaged = files.filter((f) => !f.staged);
 
   return (
     <div className="h-full flex flex-col bg-lorica-surface">
@@ -141,12 +309,16 @@ export default function GitPanel({ state, dispatch }) {
       <div className="flex items-center justify-between px-3 py-2 border-b border-lorica-border">
         <div className="flex items-center gap-2">
           <span className="text-[10px] uppercase tracking-widest text-lorica-textDim font-semibold">Git</span>
-          <span className="text-[10px] text-lorica-accent font-mono">{gitStatus.branch}</span>
-          {gitStatus.ahead > 0 && <span className="text-[9px] text-green-400">↑{gitStatus.ahead}</span>}
-          {gitStatus.behind > 0 && <span className="text-[9px] text-red-400">↓{gitStatus.behind}</span>}
+          <span className="text-[10px] text-lorica-accent font-mono">{gitStatus?.branch || '—'}</span>
+          {gitStatus?.ahead > 0 && <span className="text-[9px] text-green-400">↑{gitStatus.ahead}</span>}
+          {gitStatus?.behind > 0 && <span className="text-[9px] text-red-400">↓{gitStatus.behind}</span>}
         </div>
         <div className="flex items-center gap-1">
-          <button onClick={refresh} className={`p-1 text-lorica-textDim hover:text-lorica-accent rounded ${loading ? 'animate-spin' : ''}`} title="Refresh">
+          <button
+            onClick={scheduleRefresh}
+            className={`p-1 text-lorica-textDim hover:text-lorica-accent rounded ${refreshing ? 'animate-spin' : ''}`}
+            title="Refresh"
+          >
             <RefreshCw size={12} />
           </button>
           <button onClick={close} className="p-1 text-lorica-textDim hover:text-lorica-text"><X size={14} /></button>
@@ -164,15 +336,25 @@ export default function GitPanel({ state, dispatch }) {
               placeholder="Commit message (Ctrl+Enter)"
               className="flex-1 bg-lorica-bg border border-lorica-border rounded px-2 py-1.5 text-xs text-lorica-text outline-none focus:border-lorica-accent placeholder:text-lorica-textDim/50"
             />
-            <button onClick={handleCommit} className="p-1.5 bg-lorica-accent/20 text-lorica-accent rounded hover:bg-lorica-accent/30" title="Commit">
+            <button
+              onClick={handleCommit}
+              className="p-1.5 bg-lorica-accent/20 text-lorica-accent rounded hover:bg-lorica-accent/30"
+              title="Commit"
+            >
               <Check size={14} />
             </button>
           </div>
           <div className="flex items-center gap-1 mt-1.5">
-            <button onClick={handlePull} className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] text-lorica-textDim hover:text-lorica-text bg-lorica-bg rounded border border-lorica-border hover:border-lorica-accent/30 transition-colors">
+            <button
+              onClick={handlePull}
+              className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] text-lorica-textDim hover:text-lorica-text bg-lorica-bg rounded border border-lorica-border hover:border-lorica-accent/30 transition-colors"
+            >
               <Download size={10} /> Pull
             </button>
-            <button onClick={handlePush} className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] text-lorica-textDim hover:text-lorica-text bg-lorica-bg rounded border border-lorica-border hover:border-lorica-accent/30 transition-colors">
+            <button
+              onClick={handlePush}
+              className="flex-1 flex items-center justify-center gap-1 py-1 text-[10px] text-lorica-textDim hover:text-lorica-text bg-lorica-bg rounded border border-lorica-border hover:border-lorica-accent/30 transition-colors"
+            >
               <Upload size={10} /> Push
             </button>
           </div>
@@ -182,16 +364,17 @@ export default function GitPanel({ state, dispatch }) {
         {staged.length > 0 && (
           <div className="border-b border-lorica-border">
             <div className="flex items-center justify-between px-2 py-1">
-              <span className="text-[10px] text-green-400 font-semibold uppercase tracking-wider">Staged ({staged.length})</span>
+              <span className="text-[10px] text-green-400 font-semibold uppercase tracking-wider">
+                Staged ({staged.length})
+              </span>
             </div>
-            {staged.map((f, i) => (
-              <div key={i} className="flex items-center gap-1.5 px-2 py-0.5 text-xs hover:bg-lorica-panel/40 group">
-                <span className={`text-[10px] font-mono w-3 ${statusColor(f.status)}`}>{f.status}</span>
-                <span className="flex-1 truncate text-lorica-text">{f.path.split(/[/\\]/).pop()}</span>
-                <button onClick={() => handleUnstage(f.path)} className="opacity-0 group-hover:opacity-100 p-0.5 text-lorica-textDim hover:text-amber-400" title="Unstage">
-                  <Minus size={12} />
-                </button>
-              </div>
+            {staged.map((f) => (
+              <FileRow
+                key={`s:${f.path}`}
+                file={f}
+                staged
+                onUnstage={handleUnstage}
+              />
             ))}
           </div>
         )}
@@ -200,22 +383,25 @@ export default function GitPanel({ state, dispatch }) {
         {unstaged.length > 0 && (
           <div className="border-b border-lorica-border">
             <div className="flex items-center justify-between px-2 py-1">
-              <span className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider">Changes ({unstaged.length})</span>
-              <button onClick={handleStageAll} className="text-[10px] text-lorica-textDim hover:text-green-400" title="Stage all">
+              <span className="text-[10px] text-amber-400 font-semibold uppercase tracking-wider">
+                Changes ({unstaged.length})
+              </span>
+              <button
+                onClick={handleStageAll}
+                className="text-[10px] text-lorica-textDim hover:text-green-400"
+                title="Stage all"
+              >
                 <Plus size={12} />
               </button>
             </div>
-            {unstaged.map((f, i) => (
-              <div key={i} className="flex items-center gap-1.5 px-2 py-0.5 text-xs hover:bg-lorica-panel/40 group">
-                <span className={`text-[10px] font-mono w-3 ${statusColor(f.status)}`}>{f.status}</span>
-                <span className="flex-1 truncate text-lorica-textDim group-hover:text-lorica-text">{f.path.split(/[/\\]/).pop()}</span>
-                <button onClick={() => handleStage(f.path)} className="opacity-0 group-hover:opacity-100 p-0.5 text-lorica-textDim hover:text-green-400" title="Stage">
-                  <Plus size={12} />
-                </button>
-                <button onClick={() => handleDiscard(f.path)} className="opacity-0 group-hover:opacity-100 p-0.5 text-lorica-textDim hover:text-red-400" title="Discard">
-                  <RotateCcw size={12} />
-                </button>
-              </div>
+            {unstaged.map((f) => (
+              <FileRow
+                key={`u:${f.path}`}
+                file={f}
+                staged={false}
+                onStage={handleStage}
+                onDiscard={handleDiscard}
+              />
             ))}
           </div>
         )}
@@ -228,13 +414,16 @@ export default function GitPanel({ state, dispatch }) {
 
         {/* Branches */}
         <div className="border-b border-lorica-border">
-          <button onClick={() => setShowBranches(!showBranches)} className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-lorica-textDim hover:text-lorica-text uppercase tracking-wider font-semibold">
+          <button
+            onClick={() => setShowBranches((v) => !v)}
+            className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-lorica-textDim hover:text-lorica-text uppercase tracking-wider font-semibold"
+          >
             {showBranches ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-            <GitBranch size={10} /> Branches ({branches.length})
+            <GitBranch size={10} /> Branches {showBranches && `(${branches.length})`}
           </button>
           {showBranches && branches.map((b, i) => (
             <button
-              key={i}
+              key={`${b.name}:${i}`}
               onClick={() => !b.current && handleCheckout(b.name)}
               className={`w-full flex items-center gap-1.5 px-4 py-0.5 text-xs transition-colors ${
                 b.current ? 'text-lorica-accent' : 'text-lorica-textDim hover:text-lorica-text hover:bg-lorica-panel/40'
@@ -248,15 +437,21 @@ export default function GitPanel({ state, dispatch }) {
 
         {/* Log */}
         <div>
-          <button onClick={() => setShowLog(!showLog)} className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-lorica-textDim hover:text-lorica-text uppercase tracking-wider font-semibold">
+          <button
+            onClick={() => setShowLog((v) => !v)}
+            className="w-full flex items-center gap-1.5 px-2 py-1.5 text-[10px] text-lorica-textDim hover:text-lorica-text uppercase tracking-wider font-semibold"
+          >
             {showLog ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
             <GitCommit size={10} /> History
           </button>
           {showLog && gitLog.map((entry, i) => (
-            <div key={i} className="flex items-start gap-2 px-3 py-1 text-[11px] hover:bg-lorica-panel/30 border-l-2 border-lorica-border hover:border-lorica-accent/30">
+            <div
+              key={`${entry.hash}:${i}`}
+              className="flex items-start gap-2 px-3 py-1 text-[11px] hover:bg-lorica-panel/30 border-l-2 border-lorica-border hover:border-lorica-accent/30"
+            >
               <span className="text-lorica-accent/50 font-mono flex-shrink-0">{entry.short_hash}</span>
               <div className="flex-1 min-w-0">
-                <div className="text-lorica-text truncate">{entry.message}</div>
+                <div className="text-lorica-text truncate" title={entry.message}>{entry.message}</div>
                 <div className="text-[9px] text-lorica-textDim">{entry.author} · {entry.date}</div>
               </div>
             </div>
@@ -266,4 +461,3 @@ export default function GitPanel({ state, dispatch }) {
     </div>
   );
 }
-
